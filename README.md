@@ -54,7 +54,7 @@ graph TD;
     C --> D{AI Анализатор}
     subgraph "AI Core"
         D -- "1. Текст поста" --> E[Промпт-инжиниринг]
-        E -- "2. Запрос к LLM" --> F[Ollama (saiga_llama3)]
+        E -- "2. Запрос к LLM" --> F[Ollama saiga_llama3]
         F -- "3. JSON-ответ" --> G[Валидация Pydantic-моделью]
     end
     G -- "4. Структурированный анализ" --> C
