@@ -207,5 +207,5 @@ TAVILY_API_KEY=
 
 ---
 
-Made with ❤️ and Python
+SIMPLY LOVELY ❤️
 
