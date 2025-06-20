@@ -151,6 +151,7 @@ OLLAMA_MODEL=ilyagusev/saiga_llama3
 # Опциональный ключ для поиска через Tavily
 TAVILY_API_KEY=
 ```
+<<<<<<< HEAD
 
 ---
 
@@ -195,3 +196,4 @@ TAVILY_API_KEY=
 ---
 
 Made with ❤️ and Python
+
