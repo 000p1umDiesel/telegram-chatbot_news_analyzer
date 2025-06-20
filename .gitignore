@@ -1,0 +1,81 @@
+# =====================================
+# General
+# =====================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# =====================================
+# Python
+# =====================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual environments
+venv/
+.env/
+.envrc
+.env.*
+.env
+.sessions
+.sessions/*
+
+# Distribution / packaging
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# pytest & coverage
+.pytest_cache/
+.cache/
+.coverage*
+htmlcov/
+
+# mypy & pylint
+.mypy_cache/
+.pylint.d/
+
+# =====================================
+# Logs & runtime data
+# =====================================
+logs/
+*.log
+data/
+
+# =====================================
+# Editor & IDE folders
+# =====================================
+.idea/
+.vscode/
+*.sublime*
+
+# =====================================
+# Docker / Compose generated files
+# =====================================
+*.pid
+
+# =====================================
+# Miscellaneous
+# =====================================
+# Local Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# Backups
+*~
+*.bak
+
+# =====================================
+# End of .gitignore 

@@ -1,0 +1,45 @@
+version: '3.9'
+
+services:
+  bot:
+    build: .
+    container_name: telegram_news_analyzer
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.sessions:/app/.sessions
+    environment:
+      - PYTHONUNBUFFERED=1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; assert os.path.exists('/app/data') and os.path.exists('/app/logs')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama_service
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags | grep -q 'ilyagusev/saiga_llama3'"]
+      start_period: 5m
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
+volumes:
+  ollama_data: 

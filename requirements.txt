@@ -1,0 +1,13 @@
+# --- Core runtime ----
+aiogram==3.8.0          # Telegram-бот
+telethon==1.36.0        # Мониторинг каналов
+aiohttp==3.9.5          # HTTP-клиент (Tavily + Ollama)
+
+# --- LLM stack ----
+langchain-community>=0.2.10  # поддержка pull=True в Ollama
+ollama==0.3.3                      # Python-клиент Ollama
+tiktoken>=0.9                      # токенизация (транзитивно, но фиксируем явно)
+pydantic<3,>=2.7                   # модели данных для LangChain/внутри проекта
+
+# --- Utilities ----
+python-dotenv==1.0.1   # загрузка .env
