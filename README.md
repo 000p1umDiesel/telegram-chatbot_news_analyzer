@@ -103,11 +103,11 @@ class H,I delivery;
 ### 1. Через Docker (рекомендуемый способ)
 ```bash
 # Клонируйте репозиторий и создайте .env файл
-git clone https://github.com/ваш_аккаунт/ваш_репозиторий.git
+git clone https://github.com/000p1umDiesel/telegram-chatbot_news_analyzer
 cd ваш_репозиторий
-cp .env.example .env
+cp .env
 
-# Заполните .env: TELEGRAM_API_ID, HASH, PHONE, BOT_TOKEN и TELEGRAM_CHANNEL_IDS
+# Заполните .env
 
 # Первый запуск — скачается модель Ollama, это может занять время
 docker compose up --build -d
@@ -165,7 +165,6 @@ OLLAMA_MODEL=ilyagusev/saiga_llama3
 # Опциональный ключ для поиска через Tavily
 TAVILY_API_KEY=
 ```
-<<<<<<< HEAD
 
 ---
 
