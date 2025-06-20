@@ -46,12 +46,12 @@
 ```mermaid
 graph TD;
 
-%% Стили узлов
-classDef source fill:#cce5ff,stroke:#336699,stroke-width:1px,font-size:12px;        
-classDef processing fill:#e6ffe6,stroke:#339966,stroke-width:1px,font-size:12px;    
-classDef ai fill:#fff3cd,stroke:#cc9900,stroke-width:1px,font-size:12px;           
-classDef delivery fill:#f9e2ff,stroke:#993399,stroke-width:1px,font-size:12px;     
-classDef decision fill:#ffe6e6,stroke:#cc6666,stroke-width:1px,font-size:12px;      
+%% Яркие стили под тёмную тему
+classDef source fill:#007acc,color:#fff,stroke:#66c2ff,stroke-width:1.5px,font-size:13px;
+classDef processing fill:#00b386,color:#fff,stroke:#33ffbb,stroke-width:1.5px,font-size:13px;
+classDef ai fill:#e6ac00,color:#000,stroke:#ffd700,stroke-width:1.5px,font-size:13px;
+classDef decision fill:#cc3300,color:#fff,stroke:#ff6666,stroke-width:1.5px,font-size:13px;
+classDef delivery fill:#a64dff,color:#fff,stroke:#d9b3ff,stroke-width:1.5px,font-size:13px;
 
 subgraph Telegram
     A[Публичные<br>каналы] -->|Real-time API| B[Сборщик данных<br>на Telethon]
@@ -67,7 +67,7 @@ subgraph "ETL & AI Pipeline"
         F -->|JSON-ответ| G[Валидация<br>Pydantic-моделью]
     end
 
-    G -->|Структурированный <br>анализ| C
+    G -->|Структурированный<br>анализ| C
 end
 
 subgraph "Доставка пользователям"
@@ -75,13 +75,12 @@ subgraph "Доставка пользователям"
     H --> I((Подписчики))
 end
 
-%% Применение кастомных стилей
+%% Применение ярких стилей
 class A,B source;
 class C,G processing;
 class D decision;
 class E,F ai;
 class H,I delivery;
-
 ```
 
 ---
