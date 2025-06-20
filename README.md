@@ -45,28 +45,43 @@
 
 ```mermaid
 graph TD;
-  subgraph Telegram
-    A[Публичные каналы] -->|Real-time API| B[Сборщик данных на Telethon]
-  end
 
-  subgraph "ETL & AI Pipeline"
-    B -->|Новые посты| C[SQLite: Очередь и хранилище]
-    C --> D{AI Анализатор}
+%% Стили узлов
+classDef source fill:#cce5ff,stroke:#336699,stroke-width:1px,font-size:12px;        
+classDef processing fill:#e6ffe6,stroke:#339966,stroke-width:1px,font-size:12px;    
+classDef ai fill:#fff3cd,stroke:#cc9900,stroke-width:1px,font-size:12px;           
+classDef delivery fill:#f9e2ff,stroke:#993399,stroke-width:1px,font-size:12px;     
+classDef decision fill:#ffe6e6,stroke:#cc6666,stroke-width:1px,font-size:12px;      
+
+subgraph Telegram
+    A[Публичные<br>каналы] -->|Real-time API| B[Сборщик данных<br>на Telethon]
+end
+
+subgraph "ETL & AI Pipeline"
+    B -->|Новые посты| C[SQLite:<br>Очередь и хранилище]
+    C --> D{AI<br>Анализатор}
+
     subgraph "AI Core"
-        D -- "1. Текст поста" --> E[Промпт-инжиниринг]
-        E -- "2. Запрос к LLM" --> F[Ollama saiga_llama3]
-        F -- "3. JSON-ответ" --> G[Валидация Pydantic-моделью]
+        D -->|Текст поста| E[prompt-engineering]
+        E -->|Запрос к LLM| F[Ollama<br>saiga_llama3]
+        F -->|JSON-ответ| G[Валидация<br>Pydantic-моделью]
     end
-    G -- "4. Структурированный анализ" --> C
-  end
 
-  subgraph "Доставка пользователям"
-      C --> H[Бот на aiogram]
-      H --> I((Подписчики))
-  end
+    G -->|Структурированный <br>анализ| C
+end
 
-  style C fill:#f9f,stroke:#333,stroke-width:1px
-  style F fill:#9f9,stroke:#333,stroke-width:1px
+subgraph "Доставка пользователям"
+    C --> H[бот на<br>aiogram]
+    H --> I((Подписчики))
+end
+
+%% Применение кастомных стилей
+class A,B source;
+class C,G processing;
+class D decision;
+class E,F ai;
+class H,I delivery;
+
 ```
 
 ---
