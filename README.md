@@ -2,9 +2,8 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**AI-ассистент, который превращает информационный хаос Telegram-каналов в структурированные и осмысленные инсайты. Этот бот — полноценное ETL-решение, демонстрирующее навыки в области LLM/NLP Engineering, Data Engineering и Backend-разработки.**
+**AI-ассистент, который превращает информационный хаос Telegram-каналов в структурированные и осмысленные инсайты.**
 
 Он в реальном времени отслеживает новостные ленты, автоматически генерирует краткие саммари, определяет эмоциональную окраску и присваивает теги для удобной категоризации. Результат мгновенно доставляется подписчикам.
 
