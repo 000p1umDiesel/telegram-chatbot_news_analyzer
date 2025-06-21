@@ -9,5 +9,8 @@ ollama==0.3.3                      # Python-клиент Ollama
 tiktoken>=0.9                      # токенизация (транзитивно, но фиксируем явно)
 pydantic<3,>=2.7                   # модели данных для LangChain/внутри проекта
 
+# --- System monitoring ----
+psutil>=5.9.0           # Системные метрики (CPU, память, диск)
+
 # --- Utilities ----
 python-dotenv==1.0.1   # загрузка .env
