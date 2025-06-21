@@ -2,9 +2,8 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**AI-ассистент, который превращает информационный хаос Telegram-каналов в структурированные и осмысленные инсайты. Этот бот — полноценное ETL-решение, демонстрирующее навыки в области LLM/NLP Engineering, Data Engineering и Backend-разработки.**
+**AI-ассистент, который превращает информационный хаос Telegram-каналов в структурированные и осмысленные инсайты.**
 
 Он в реальном времени отслеживает новостные ленты, автоматически генерирует краткие саммари, определяет эмоциональную окраску и присваивает теги для удобной категоризации. Результат мгновенно доставляется подписчикам.
 
@@ -49,17 +48,26 @@
 
 ```mermaid
 graph TD;
-  subgraph Telegram
-    A[Публичные каналы] -->|Real-time API| B[Сборщик данных на Telethon]
-  end
 
-  subgraph "ETL & AI Pipeline"
-    B -->|Новые посты| C[SQLite: Очередь и хранилище]
-    C --> D{AI Анализатор}
+%% Яркие стили под тёмную тему
+classDef source fill:#007acc,color:#fff,stroke:#66c2ff,stroke-width:1.5px,font-size:13px;
+classDef processing fill:#00b386,color:#fff,stroke:#33ffbb,stroke-width:1.5px,font-size:13px;
+classDef ai fill:#e6ac00,color:#000,stroke:#ffd700,stroke-width:1.5px,font-size:13px;
+classDef decision fill:#cc3300,color:#fff,stroke:#ff6666,stroke-width:1.5px,font-size:13px;
+classDef delivery fill:#a64dff,color:#fff,stroke:#d9b3ff,stroke-width:1.5px,font-size:13px;
+
+subgraph Telegram
+    A[Публичные<br>каналы] -->|Real-time API| B[Сборщик данных<br>на Telethon]
+end
+
+subgraph "ETL & AI Pipeline"
+    B -->|Новые посты| C[SQLite:<br>Очередь и хранилище]
+    C --> D{AI<br>Анализатор}
+
     subgraph "AI Core"
-        D -- "1. Текст поста" --> E[Промпт-инжиниринг]
-        E -- "2. Запрос к LLM" --> F[Ollama (saiga_llama3)]
-        F -- "3. JSON-ответ" --> G[Валидация Pydantic-моделью]
+        D -->|Текст поста| E[prompt-engineering]
+        E -->|Запрос к LLM| F[Ollama<br>saiga_llama3]
+        F -->|JSON-ответ| G[Валидация<br>Pydantic-моделью]
     end
     G -- "4. Структурированный анализ" --> C
     C --> H[Система уведомлений]
@@ -86,7 +94,7 @@ graph TD;
 | **LLM / NLP Engineering** | • **Промпт-инжиниринг** для получения структурированного вывода (JSON).<br>• **Structured Data Extraction** с LLM и валидация с помощью **Pydantic**.<br>• **Fine-tuning задач**: Суммаризация, анализ тональности, классификация текста.<br>• Работа с фреймворками **LangChain** и локальными LLM через **Ollama**. |
 | **Data Engineering** | • Создание **ETL-пайплайна** для данных в реальном времени.<br>• Реализация **checkpoint-механизмов** для инкрементальной загрузки.<br>• Управление состоянием и кэширование в **SQLite**.<br>• Система очередей и batch-обработка уведомлений. |
 | **Backend & Software Engineering** | • **Асинхронное программирование** (`asyncio`).<br>• Разработка ботов с помощью **aiogram 3**.<br>• Модульная и масштабируемая архитектура приложения.<br>• Конфигурирование через переменные окружения (`.env`).<br>• Комплексная система логирования и мониторинга.<br>• Обработка ошибок и graceful shutdown. |
-| **DevOps** | • **Контейнеризация** приложения и его зависимостей с помощью **Docker**.<br>• Орстрация сервисов (бот + LLM) через **Docker Compose**.<br>• Настройка `health-check` для гарантированного порядка запуска сервисов. |
+| **DevOps** | • **Контейнеризация** приложения и его зависимостей с помощью **Docker**.<br>• Оркестрация сервисов (бот + LLM) через **Docker Compose**.<br>• Настройка `health-check` для гарантированного порядка запуска сервисов. |
 
 ---
 
@@ -95,11 +103,11 @@ graph TD;
 ### 1. Через Docker (рекомендуемый способ)
 ```bash
 # Клонируйте репозиторий и создайте .env файл
-git clone https://github.com/ваш_аккаунт/ваш_репозиторий.git
+git clone https://github.com/000p1umDiesel/telegram-chatbot_news_analyzer
 cd ваш_репозиторий
-cp .env.example .env
+cp .env
 
-# Заполните .env: TELEGRAM_API_ID, HASH, PHONE, BOT_TOKEN и TELEGRAM_CHANNEL_IDS
+# Заполните .env
 
 # Первый запуск — скачается модель Ollama, это может занять время
 docker compose up --build -d
@@ -253,5 +261,5 @@ TAVILY_API_KEY=
 
 ---
 
-SIMPLY LOVELY ❤️ 
+SIMPLY LOVELY ❤️
 
