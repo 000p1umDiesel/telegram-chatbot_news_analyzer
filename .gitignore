@@ -68,6 +68,16 @@ data/
 *.pid
 
 # =====================================
+# Testing & Evaluation Results
+# =====================================
+# Test result files
+evaluation/*_results.json
+evaluation/test_report.json
+evaluation/test_report.txt
+evaluation/test_suite_report.json
+evaluation/demo_results.json
+
+# =====================================
 # Miscellaneous
 # =====================================
 # Local Jupyter notebooks checkpoints
