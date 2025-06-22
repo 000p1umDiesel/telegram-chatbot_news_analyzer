@@ -405,7 +405,10 @@ class DataManager:  # pylint: disable=too-few-public-methods
             return False
 
     def should_send_notification(
-        self, chat_id: int, sentiment: str = None, hashtags: list = None
+        self,
+        chat_id: int,
+        sentiment: Optional[str] = None,
+        hashtags: Optional[List[str]] = None,
     ) -> bool:
         """Проверяет, нужно ли отправлять уведомление пользователю."""
         try:
@@ -458,22 +461,32 @@ class DataManager:  # pylint: disable=too-few-public-methods
     def get_statistics(self) -> Optional[Dict[str, Any]]:  # noqa: ANN401
         """Возвращает агрегированную статистику по сообщениям и анализам."""
         with self._lock, self.conn:
-            cur_total = self.conn.execute("SELECT COUNT(*) AS cnt FROM messages")
+            cur_total = self.conn.execute(
+                "SELECT COUNT(*) AS cnt FROM messages LIMIT 1"
+            )
             total_messages = cur_total.fetchone()["cnt"]
             if total_messages == 0:
                 return None
 
-            # sentiment counts
+            # sentiment counts с оптимизацией
             cur_sent = self.conn.execute(
-                "SELECT sentiment, COUNT(*) AS c FROM analyses GROUP BY sentiment"
+                """SELECT sentiment, COUNT(*) AS c 
+                   FROM analyses 
+                   WHERE sentiment IS NOT NULL
+                   GROUP BY sentiment 
+                   LIMIT 10"""
             )
             sentiment_counts = {
                 row["sentiment"]: row["c"] for row in cur_sent.fetchall()
             }
 
-            # top hashtags (JSON arrays) – flatten
+            # top hashtags (JSON arrays) – flatten с лимитом
             cur_hashtags = self.conn.execute(
-                "SELECT hashtags FROM analyses WHERE hashtags IS NOT NULL"
+                """SELECT hashtags 
+                   FROM analyses 
+                   WHERE hashtags IS NOT NULL 
+                   AND hashtags != '[]'
+                   LIMIT 1000"""  # Ограничиваем выборку для производительности
             )
             hashtag_counter: Dict[str, int] = {}
             for row in cur_hashtags.fetchall():
@@ -483,6 +496,7 @@ class DataManager:  # pylint: disable=too-few-public-methods
                     continue
                 for tag in tags:
                     hashtag_counter[tag] = hashtag_counter.get(tag, 0) + 1
+
             # sort by freq desc
             popular_hashtags = [
                 tag

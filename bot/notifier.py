@@ -67,99 +67,28 @@ class NotificationTemplate:
 
 
 class NotificationManager:
-    """Менеджер уведомлений с улучшенной логикой."""
+    """Упрощенный менеджер уведомлений с улучшенной производительностью."""
 
     def __init__(self, bot: Bot):
         self.bot = bot
-        self.notification_queue: List[Dict[str, Any]] = []
-        self.batch_size = 1  # Отправляем сразу (было 5)
-        self.batch_timeout = 10  # Секунд ожидания для группировки
-        self._timeout_task = None  # Задача для таймаута
+        self.stats = {
+            "total_sent": 0,
+            "total_failed": 0,
+            "blocked_users": set(),
+        }
 
-    async def add_notification(self, analysis_data: Dict[str, Any]):
-        """Добавляет уведомление в очередь."""
-        logger.info(
-            f"📥 Добавляю уведомление в очередь: {analysis_data.get('channel_title')}"
-        )
-        self.notification_queue.append({**analysis_data, "timestamp": datetime.now()})
-        logger.info(
-            f"📋 Размер очереди: {len(self.notification_queue)}/{self.batch_size}"
-        )
+    async def send_notification(self, analysis_data: Dict[str, Any]):
+        """Отправляет уведомление всем подписчикам."""
+        logger.info(f"📤 Отправка уведомления: {analysis_data.get('channel_title')}")
 
-        # Если достигли лимита батча, отправляем немедленно
-        if len(self.notification_queue) >= self.batch_size:
-            logger.info(f"🚀 Достигнут лимит батча, отправляю немедленно")
-            if self._timeout_task:
-                self._timeout_task.cancel()
-                self._timeout_task = None
-            await self._send_batch()
-        else:
-            # Если это первое уведомление в очереди, запускаем таймер
-            if len(self.notification_queue) == 1:
-                logger.info(f"⏰ Запускаю таймер на {self.batch_timeout}с")
-                self._timeout_task = asyncio.create_task(self._timeout_handler())
-            logger.info(
-                f"⏳ Ждем больше уведомлений или таймаута ({self.batch_timeout}с)"
-            )
-
-    async def _timeout_handler(self):
-        """Обработчик таймаута для отправки накопленных уведомлений."""
-        try:
-            await asyncio.sleep(self.batch_timeout)
-            if self.notification_queue:
-                logger.info(
-                    f"⏰ Таймаут истек, отправляю {len(self.notification_queue)} уведомлений"
-                )
-                await self._send_batch()
-        except asyncio.CancelledError:
-            logger.info("⏰ Таймер отменен")
-        finally:
-            self._timeout_task = None
-
-    async def _send_batch(self):
-        """Отправляет батч уведомлений."""
-        if not self.notification_queue:
-            logger.info("📭 Очередь уведомлений пуста")
-            return
-
-        logger.info(
-            f"📬 Начинаю отправку батча из {len(self.notification_queue)} уведомлений"
-        )
         subscribers = data_manager.get_all_subscribers()
-        logger.info(f"👥 Найдено подписчиков: {len(subscribers)} - {subscribers}")
-
         if not subscribers:
-            logger.warning("⚠️ Подписчики для уведомлений не найдены. Очищаю очередь.")
-            self.notification_queue.clear()
+            logger.warning("⚠️ Подписчики для уведомлений не найдены.")
             return
 
-        # Группируем по каналам
-        channel_groups = {}
-        for notification in self.notification_queue:
-            channel = notification["channel_title"]
-            if channel not in channel_groups:
-                channel_groups[channel] = []
-            channel_groups[channel].append(notification)
-
-        # Отправляем уведомления
-        for channel, notifications in channel_groups.items():
-            if len(notifications) == 1:
-                # Одиночное уведомление
-                await self._send_single_notification(notifications[0], subscribers)
-            else:
-                # Групповое уведомление
-                await self._send_group_notification(channel, notifications, subscribers)
-
-        # Очищаем очередь
-        self.notification_queue.clear()
-
-    async def _send_single_notification(
-        self, notification_data: Dict[str, Any], subscribers: List[int]
-    ):
-        """Отправляет одиночное уведомление."""
-        message_text = NotificationTemplate.format_analysis_message(notification_data)
+        message_text = NotificationTemplate.format_analysis_message(analysis_data)
         keyboard = NotificationTemplate.get_notification_keyboard(
-            notification_data["message_link"]
+            analysis_data["message_link"]
         )
 
         successful_sends = 0
@@ -167,10 +96,14 @@ class NotificationManager:
         filtered_sends = 0
 
         for user_id in subscribers:
+            # Пропускаем заблокированных пользователей
+            if user_id in self.stats["blocked_users"]:
+                continue
+
             try:
                 # Проверяем настройки пользователя
-                sentiment = notification_data.get("sentiment")
-                hashtags = notification_data.get("hashtags", [])
+                sentiment = analysis_data.get("sentiment")
+                hashtags = analysis_data.get("hashtags", [])
 
                 if not data_manager.should_send_notification(
                     user_id, sentiment, hashtags
@@ -187,97 +120,53 @@ class NotificationManager:
                 )
                 successful_sends += 1
 
-                # Небольшая задержка между отправками
-                await asyncio.sleep(0.1)
+                # Небольшая задержка между отправками для избежания rate limits
+                await asyncio.sleep(0.05)
 
             except TelegramAPIError as e:
                 failed_sends += 1
-                logger.warning(
-                    f"Не удалось отправить уведомление пользователю {user_id}: {e}"
-                )
+                error_msg = str(e).lower()
 
-                if "bot was blocked" in str(e).lower():
+                if "bot was blocked" in error_msg or "user is deactivated" in error_msg:
                     logger.info(
-                        f"Пользователь {user_id} заблокировал бота. Удаляю из подписчиков."
+                        f"Пользователь {user_id} заблокировал бота или деактивирован"
                     )
+                    self.stats["blocked_users"].add(user_id)
+                    # Можно удалить из подписчиков
                     data_manager.remove_subscriber(user_id)
+                else:
+                    logger.warning(
+                        f"Не удалось отправить уведомление пользователю {user_id}: {e}"
+                    )
 
             except Exception as e:
                 failed_sends += 1
                 logger.error(
-                    f"Ошибка при отправке уведомления пользователю {user_id}: {e}"
+                    f"Неожиданная ошибка при отправке пользователю {user_id}: {e}"
                 )
+
+        # Обновляем статистику
+        self.stats["total_sent"] += successful_sends
+        self.stats["total_failed"] += failed_sends
 
         logger.info(
-            f"Уведомление отправлено: {successful_sends} успешно, {failed_sends} ошибок, {filtered_sends} отфильтровано"
+            f"📊 Уведомление отправлено: ✅ {successful_sends}, "
+            f"❌ {failed_sends}, 🔇 {filtered_sends} (отфильтровано)"
         )
 
-    async def _send_group_notification(
-        self, channel: str, notifications: List[Dict[str, Any]], subscribers: List[int]
-    ):
-        """Отправляет групповое уведомление."""
-        # Сокращаем название канала
-        channel_short = channel[:25] + "..." if len(channel) > 25 else channel
-
-        header = f"📰 **{len(notifications)} новостей из «{channel_short}»**\n\n"
-
-        messages = []
-        for i, notification in enumerate(
-            notifications[:3], 1
-        ):  # Показываем только первые 3
-            sentiment_emoji = NotificationTemplate.get_sentiment_emoji(
-                notification["sentiment"]
-            )
-            summary = notification["summary"]
-            if len(summary) > 100:
-                summary = summary[:97] + "..."
-
-            messages.append(
-                f"**{i}.** {sentiment_emoji} {summary}\n"
-                f"🔗 [Читать]({notification['message_link']})"
-            )
-
-        if len(notifications) > 3:
-            messages.append(f"\n... и еще {len(notifications) - 3} новостей")
-
-        group_message = header + "\n\n".join(messages)
-        group_message += f"\n\n⏰ {datetime.now().strftime('%H:%M')}"
-
-        successful_sends = 0
-        failed_sends = 0
-
-        for user_id in subscribers:
-            try:
-                await self.bot.send_message(
-                    chat_id=user_id,
-                    text=group_message,
-                    parse_mode=ParseMode.MARKDOWN,
-                    disable_web_page_preview=True,
-                )
-                successful_sends += 1
-                await asyncio.sleep(0.1)
-
-            except TelegramAPIError as e:
-                failed_sends += 1
-                logger.warning(
-                    f"Не удалось отправить групповое уведомление пользователю {user_id}: {e}"
-                )
-
-                if "bot was blocked" in str(e).lower():
-                    logger.info(
-                        f"Пользователь {user_id} заблокировал бота. Удаляю из подписчиков."
-                    )
-                    data_manager.remove_subscriber(user_id)
-
-            except Exception as e:
-                failed_sends += 1
-                logger.error(
-                    f"Ошибка при отправке группового уведомления пользователю {user_id}: {e}"
-                )
-
-        logger.info(
-            f"Групповое уведомление отправлено: {successful_sends} успешно, {failed_sends} ошибок"
-        )
+    def get_stats(self) -> Dict[str, Any]:
+        """Возвращает статистику отправки уведомлений."""
+        return {
+            "total_sent": self.stats["total_sent"],
+            "total_failed": self.stats["total_failed"],
+            "blocked_users_count": len(self.stats["blocked_users"]),
+            "success_rate": (
+                self.stats["total_sent"]
+                / (self.stats["total_sent"] + self.stats["total_failed"])
+                if (self.stats["total_sent"] + self.stats["total_failed"]) > 0
+                else 0
+            ),
+        }
 
 
 # Глобальный экземпляр менеджера уведомлений
@@ -285,7 +174,7 @@ _notification_manager = None
 
 
 def get_notification_manager(bot: Bot) -> NotificationManager:
-    """Возвращает глобальный экземпляр менеджера уведомлений."""
+    """Возвращает синглтон менеджера уведомлений."""
     global _notification_manager
     if _notification_manager is None:
         _notification_manager = NotificationManager(bot)
@@ -293,16 +182,9 @@ def get_notification_manager(bot: Bot) -> NotificationManager:
 
 
 async def send_analysis_result(bot: Bot, analysis_data: Dict[str, Any]):
-    """
-    Отправляет отформатированный результат анализа всем подписчикам.
-    Использует улучшенную систему уведомлений.
-    """
-    logger.info(
-        f"🔔 Получен запрос на отправку уведомления: канал={analysis_data.get('channel_title')}, тональность={analysis_data.get('sentiment')}"
-    )
+    """Основная функция для отправки результата анализа."""
     manager = get_notification_manager(bot)
-    await manager.add_notification(analysis_data)
-    logger.info(f"📤 Уведомление добавлено в очередь менеджера")
+    await manager.send_notification(analysis_data)
 
 
 # Обратная совместимость - оставляем старую функцию

@@ -9,11 +9,21 @@ from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 import time
 
+# Импортируем новые утилиты
+from utils.error_handler import (
+    retry_with_backoff,
+    RetryConfig,
+    ErrorCategory,
+    global_error_handler,
+)
+from utils.performance import performance_timer, global_performance_monitor
+from utils.constants import DEFAULT_CHECK_INTERVAL_SECONDS, MAX_CONCURRENT_REQUESTS
+
 logger = get_logger()
 
 
 class MonitoringService:
-    def __init__(self, bot: Bot, max_concurrent_tasks: int = 3):
+    def __init__(self, bot: Bot, max_concurrent_tasks: int = MAX_CONCURRENT_REQUESTS):
         self.bot = bot
         self.monitor = telegram_monitor
         self.analyzer = llm_analyzer
@@ -27,52 +37,59 @@ class MonitoringService:
             "start_time": time.time(),
         }
 
+    @retry_with_backoff(
+        config=RetryConfig(max_attempts=2, base_delay=0.5),
+        exceptions=(Exception,),
+        category=ErrorCategory.SYSTEM,
+    )
     async def _process_single_message(
         self, message: Dict[str, Any], channel_id: str
     ) -> bool:
         """Обрабатывает одно сообщение с семафором для ограничения параллелизма."""
         async with self.semaphore:
-            try:
-                analysis = await self.analyzer.analyze_message(message["text"])
-                if not analysis:
-                    logger.warning(
-                        f"Не удалось проанализировать сообщение ID: {message['id']} из канала {channel_id}"
+            async with performance_timer(f"process_message_{channel_id}"):
+                try:
+                    analysis = await self.analyzer.analyze_message(message["text"])
+                    if not analysis:
+                        logger.warning(
+                            f"Не удалось проанализировать сообщение ID: {message['id']} из канала {channel_id}"
+                        )
+                        self.stats["failed_messages"] += 1
+                        return False
+
+                    self.data_manager.save_message(message)
+                    self.data_manager.save_analysis(message["id"], analysis.dict())
+
+                    # Формируем и отправляем уведомление
+                    message_link = (
+                        f"https://t.me/{message['channel_username']}/{message['id']}"
+                        if message.get("channel_username")
+                        else "N/A"
+                    )
+                    notification_data = {
+                        "channel_title": message.get(
+                            "channel_title", "Неизвестный источник"
+                        ),
+                        "message_link": message_link,
+                        "summary": analysis.summary,
+                        "sentiment": analysis.sentiment,
+                        "hashtags_formatted": analysis.format_hashtags(),
+                    }
+                    await send_analysis_result(self.bot, notification_data)
+
+                    # Обновляем ID последнего сообщения для этого канала
+                    self.data_manager.set_last_message_id(channel_id, message["id"])
+                    self.stats["processed_messages"] += 1
+                    return True
+
+                except Exception as e:
+                    global_error_handler.handle_error(
+                        e,
+                        f"Processing message {message.get('id')} from {channel_id}",
+                        ErrorCategory.SYSTEM,
                     )
                     self.stats["failed_messages"] += 1
                     return False
-
-                self.data_manager.save_message(message)
-                self.data_manager.save_analysis(message["id"], analysis.dict())
-
-                # Формируем и отправляем уведомление
-                message_link = (
-                    f"https://t.me/{message['channel_username']}/{message['id']}"
-                    if message.get("channel_username")
-                    else "N/A"
-                )
-                notification_data = {
-                    "channel_title": message.get(
-                        "channel_title", "Неизвестный источник"
-                    ),
-                    "message_link": message_link,
-                    "summary": analysis.summary,
-                    "sentiment": analysis.sentiment,
-                    "hashtags_formatted": analysis.format_hashtags(),
-                }
-                await send_analysis_result(self.bot, notification_data)
-
-                # Обновляем ID последнего сообщения для этого канала
-                self.data_manager.set_last_message_id(channel_id, message["id"])
-                self.stats["processed_messages"] += 1
-                return True
-
-            except Exception as e:
-                logger.error(
-                    f"Ошибка при обработке сообщения ID {message.get('id')} из канала {channel_id}: {e}",
-                    exc_info=True,
-                )
-                self.stats["failed_messages"] += 1
-                return False
 
     async def _process_channel(self, channel_id: str):
         """Обрабатывает один канал: получает и анализирует новые сообщения."""

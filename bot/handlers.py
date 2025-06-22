@@ -8,6 +8,16 @@ import config
 from logger import get_logger
 from typing import Dict, Any
 
+# Импортируем новые утилиты
+from utils.error_handler import global_error_handler, ErrorCategory
+from utils.performance import performance_timer
+from utils.constants import (
+    SENTIMENT_EMOJI_MAP,
+    MAX_POPULAR_HASHTAGS_DISPLAY,
+    MAX_CHANNEL_TITLE_DISPLAY,
+    EMOJI_UNKNOWN,
+)
+
 logger = get_logger()
 
 dp = Dispatcher()
@@ -201,7 +211,7 @@ async def cmd_help(message: types.Message):
         "`/help` - Показать эту справку\n"
         "`/stats` - Статистика анализа новостей\n"
         "`/subscribe` - Управление подпиской\n"
-        "`/notifications` - Настройки уведомлений\n\n"
+        # "`/notifications` - Настройки уведомлений\n\n"
         "**Работа с ИИ:**\n"
         "`/chat <текст>` - Пообщаться с ИИ-ассистентом\n"
         "`/analyze <текст>` - Проанализировать текст\n"
@@ -249,8 +259,7 @@ async def cmd_status(message: types.Message):
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
-    if message.bot:
-        await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    await send_typing_action(message)
     try:
         stats = data_manager.get_statistics()
         if not stats or stats.get("total_messages", 0) == 0:
@@ -261,36 +270,11 @@ async def cmd_stats(message: types.Message):
             )
             return
 
-        sentiment_counts = stats.get("sentiment_counts", {})
-        hashtags = stats.get("popular_hashtags", [])
-
-        # Создаем красивую статистику
-        total = stats.get("total_messages", 0)
-        positive = sentiment_counts.get("Позитивная", 0)
-        negative = sentiment_counts.get("Негативная", 0)
-        neutral = sentiment_counts.get("Нейтральная", 0)
-
-        # Вычисляем проценты
-        pos_pct = (positive / total * 100) if total > 0 else 0
-        neg_pct = (negative / total * 100) if total > 0 else 0
-        neu_pct = (neutral / total * 100) if total > 0 else 0
-
-        hashtags_str = f"`{'`, `'.join(hashtags[:10])}`" if hashtags else "нет данных"
-
-        response = (
-            f"📊 **Статистика анализа новостей:**\n\n"
-            f"📝 **Всего обработано:** {total}\n\n"
-            f"🎯 **Анализ тональности:**\n"
-            f"📈 Позитивных: {positive} ({pos_pct:.1f}%)\n"
-            f"📉 Негативных: {negative} ({neg_pct:.1f}%)\n"
-            f"➖ Нейтральных: {neutral} ({neu_pct:.1f}%)\n\n"
-            f"🏷️ **Популярные теги:**\n"
-            f"{hashtags_str}"
+        await message.answer(
+            format_statistics_message(stats), parse_mode=ParseMode.MARKDOWN
         )
-        await message.answer(response, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
-        logger.error(f"Ошибка при получении статистики: {e}")
-        await message.answer("❌ Ошибка при получении статистики.")
+        await handle_command_error(message, e, "получении статистики")
 
 
 @dp.message(Command("chat"))
@@ -304,8 +288,7 @@ async def cmd_chat(message: types.Message, command: CommandObject):
         )
         return
     text = command.args
-    if message.bot:
-        await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    await send_typing_action(message)
 
     progress_msg = await message.answer("🤔 Думаю...")
     response = await llm_analyzer.get_chat_response(text)
@@ -325,8 +308,7 @@ async def cmd_analyze(message: types.Message, command: CommandObject):
         )
         return
     text_to_analyze = command.args
-    if message.bot:
-        await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    await send_typing_action(message)
     progress = await message.answer("🔍 Анализирую текст...")
 
     analysis = await llm_analyzer.analyze_message(text_to_analyze)
@@ -366,7 +348,7 @@ async def cmd_web(message: types.Message, command: CommandObject):
         )
         return
     query = command.args
-    await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    await send_typing_action(message)
     progress = await message.answer(f'🔍 Ищу информацию по запросу: "{query}"...')
 
     search_results = await tavily_search.search(query)
@@ -377,16 +359,26 @@ async def cmd_web(message: types.Message, command: CommandObject):
         await progress.edit_text(f"🤷‍♂️ По запросу «{query}» ничего не найдено.")
         return
     formatted = tavily_search.format_search_results(search_results, query)
-    await progress.edit_text(
-        formatted, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True
-    )
+
+    try:
+        await progress.edit_text(
+            formatted, parse_mode=ParseMode.MARKDOWN_V2, disable_web_page_preview=True
+        )
+    except Exception as e:
+        # Fallback: отправляем без форматирования, если есть проблемы с Markdown
+        logger.warning(f"Ошибка парсинга Markdown в /web: {e}")
+        # Создаем простую версию без форматирования
+        simple_formatted = tavily_search.format_search_results_simple(
+            search_results, query
+        )
+        await progress.edit_text(simple_formatted, disable_web_page_preview=True)
 
 
 @dp.message(F.chat.type == "private")
 async def handle_non_command(message: types.Message):
     """Обрабатывает обычные сообщения как чат с ИИ."""
     if message.text and not message.text.startswith("/"):
-        await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+        await send_typing_action(message)
 
         # Показываем индикатор обработки
         progress_msg = await message.answer("🤔 Обрабатываю ваш запрос...")
@@ -400,7 +392,7 @@ async def handle_non_command(message: types.Message):
 @dp.message(Command("trends"))
 async def cmd_trends(message: types.Message):
     """Показывает трендовые темы."""
-    await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    await send_typing_action(message)
     progress = await message.answer("📈 Анализирую тренды...")
 
     try:
@@ -433,7 +425,7 @@ async def cmd_trends(message: types.Message):
 @dp.message(Command("digest"))
 async def cmd_digest(message: types.Message):
     """Генерирует дайджест новостей за день."""
-    await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    await send_typing_action(message)
     progress = await message.answer("📰 Готовлю дайджест новостей...")
 
     try:
@@ -520,7 +512,7 @@ async def cmd_digest(message: types.Message):
 @dp.message(Command("health"))
 async def cmd_health(message: types.Message):
     """Показывает состояние здоровья системы."""
-    await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    await send_typing_action(message)
     progress = await message.answer("🏥 Проверяю состояние системы...")
 
     try:
@@ -731,3 +723,51 @@ async def cmd_notifications(message: types.Message, command: CommandObject):
             "Используйте `/notifications` для справки.",
             parse_mode=ParseMode.MARKDOWN,
         )
+
+
+# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ УСТРАНЕНИЯ ДУБЛИРОВАНИЯ ===
+
+
+async def send_typing_action(message: types.Message):
+    """Отправляет индикатор печати, если доступен бот."""
+    if message.bot:
+        await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+
+
+async def handle_command_error(message: types.Message, error: Exception, context: str):
+    """Централизованная обработка ошибок команд."""
+    global_error_handler.handle_error(error, context, ErrorCategory.TELEGRAM_API)
+    await message.answer(f"❌ Ошибка при {context}.")
+
+
+def format_statistics_message(stats: Dict[str, Any]) -> str:
+    """Форматирует сообщение со статистикой."""
+    sentiment_counts = stats.get("sentiment_counts", {})
+    hashtags = stats.get("popular_hashtags", [])
+
+    total = stats.get("total_messages", 0)
+    positive = sentiment_counts.get("Позитивная", 0)
+    negative = sentiment_counts.get("Негативная", 0)
+    neutral = sentiment_counts.get("Нейтральная", 0)
+
+    # Вычисляем проценты
+    pos_pct = (positive / total * 100) if total > 0 else 0
+    neg_pct = (negative / total * 100) if total > 0 else 0
+    neu_pct = (neutral / total * 100) if total > 0 else 0
+
+    # Используем константу для ограничения количества хештегов
+    display_hashtags = hashtags[:MAX_POPULAR_HASHTAGS_DISPLAY]
+    hashtags_str = (
+        f"`{'`, `'.join(display_hashtags)}`" if display_hashtags else "нет данных"
+    )
+
+    return (
+        f"📊 **Статистика анализа новостей:**\n\n"
+        f"📝 **Всего обработано:** {total}\n\n"
+        f"🎯 **Анализ тональности:**\n"
+        f"📈 Позитивных: {positive} ({pos_pct:.1f}%)\n"
+        f"📉 Негативных: {negative} ({neg_pct:.1f}%)\n"
+        f"➖ Нейтральных: {neutral} ({neu_pct:.1f}%)\n\n"
+        f"🏷️ **Популярные теги:**\n"
+        f"{hashtags_str}"
+    )
