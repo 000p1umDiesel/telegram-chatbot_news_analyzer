@@ -28,6 +28,39 @@
 └─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
 
+<details>
+<summary>🖼️ <b>Современная схема (Mermaid)</b> (кликабельно)</summary>
+
+```mermaid
+flowchart TD
+    subgraph Telegram
+        A1["Telegram API"]
+        A2["Telegram Channels"]
+        A3["Telegram Bot (aiogram)"]
+    end
+    subgraph Core
+        B1["Channel Monitor"]
+        B2["LLM Analyzer (Ollama)"]
+        B3["Notification Manager"]
+        B4["PostgreSQL DB"]
+    end
+    subgraph External
+        C1["Tavily Search API"]
+        C2["Ollama Server"]
+    end
+
+    A2-->|Мониторинг|B1
+    B1-->|Анализ новости|B2
+    B2-->|Результаты|B3
+    B3-->|Уведомления|A3
+    B3-->|Сохранение|B4
+    A3-->|/chat, /analyze|B2
+    A3-->|/web|C1
+    B2-->|LLM запрос|C2
+```
+
+</details>
+
 ## 🚀 Быстрый старт
 
 ### 1. Клонирование и установка
