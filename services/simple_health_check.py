@@ -6,7 +6,8 @@ import asyncio
 import time
 from datetime import datetime
 from logger import get_logger
-from services import data_manager
+
+# data_manager импортируется динамически для избежания circular imports
 
 logger = get_logger()
 
@@ -18,13 +19,22 @@ class SimpleHealthCheck:
         self.start_time = time.time()
         self.last_check = None
 
-    def check_database(self) -> bool:
-        """Проверяет базу данных."""
+    async def check_database(self) -> bool:
+        """Проверяет доступность БД для любой реализации data_manager."""
         try:
-            with data_manager._lock, data_manager.conn:
-                cursor = data_manager.conn.execute("SELECT 1")
-                result = cursor.fetchone()
-                return result is not None
+            # Импортируем data_manager динамически
+            from services import data_manager
+
+            if data_manager is None:
+                return False
+
+            # Асинхронная PostgreSQL реализация
+            if hasattr(data_manager, "pool"):
+                async with data_manager.pool.acquire() as conn:  # type: ignore[attr-defined]
+                    await conn.execute("SELECT 1")
+                    return True
+
+            return False
         except Exception:
             return False
 
@@ -32,16 +42,21 @@ class SimpleHealthCheck:
         """Возвращает время работы в часах."""
         return (time.time() - self.start_time) / 3600
 
-    def get_basic_stats(self) -> dict:
+    async def get_basic_stats(self) -> dict:
         """Возвращает базовую статистику."""
         try:
-            subscribers = len(data_manager.get_all_subscribers())
+            from services import data_manager
+
+            if data_manager is not None:
+                subscribers = len(await data_manager.get_all_subscribers())  # type: ignore
+            else:
+                subscribers = 0
         except Exception:
             subscribers = 0
 
         return {
             "uptime_hours": self.get_uptime_hours(),
-            "database_ok": self.check_database(),
+            "database_ok": await self.check_database(),
             "subscribers_count": subscribers,
             "last_check": datetime.now().isoformat(),
         }
@@ -54,7 +69,7 @@ class SimpleHealthCheck:
 
         while True:
             try:
-                stats = self.get_basic_stats()
+                stats = await self.get_basic_stats()
                 self.last_check = datetime.now()
 
                 # Логируем только важные события

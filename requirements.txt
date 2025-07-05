@@ -1,25 +1,54 @@
-# --- Core runtime ----
-aiogram==3.8.0          # Telegram-бот
-telethon==1.36.0        # Мониторинг каналов
-aiohttp==3.9.5          # HTTP-клиент (Tavily + Ollama)
+# ============================================================================
+# PRODUCTION DEPENDENCIES
+# ============================================================================
 
-# --- LLM stack ----
-langchain-community>=0.2.10  # поддержка pull=True в Ollama
-ollama==0.3.3                      # Python-клиент Ollama
-tiktoken>=0.9                      # токенизация (транзитивно, но фиксируем явно)
-pydantic<3,>=2.7                   # модели данных для LangChain/внутри проекта
+# Telegram
+aiogram==3.8.0           # Telegram Bot API
+telethon==1.36.0         # Telegram client для мониторинга каналов
 
-# --- System monitoring ----
-psutil>=5.9.0           # Системные метрики для новых утилит мониторинга производительности
+# HTTP & Web
+aiohttp==3.9.5           # HTTP-client
+tavily-python==0.3.3     # Web search API
 
-# --- Utilities ----
-python-dotenv==1.0.1   # загрузка .env
+# LLM & AI
+langchain==0.3.26        # LangChain core
+langchain-community==0.3.27  # LangChain community integrations
+ollama==0.3.3            # Python-клиент Ollama
+tiktoken==0.9.0          # Tokenizer
 
-# --- Evaluation & hallucination check ----
+# Database
+psycopg[binary]==3.2.9   # PostgreSQL driver
+psycopg-pool==3.2.6      # Connection pooling
+asyncpg==0.30.0          # Async PostgreSQL driver
+psycopg2-binary==2.9.9   # Sync PostgreSQL driver
+
+# Configuration & Validation
+pydantic>=2.7.4          # Data validation (совместимо с aiogram)
+pydantic-settings>=2.2.1 # Settings management
+python-dotenv==1.0.1     # Environment variables
+
+# Templates & Utils
+jinja2==3.1.3            # Template engine для промптов
+
+# ============================================================================
+# DEVELOPMENT & TESTING DEPENDENCIES
+# ============================================================================
+
+# System monitoring
+psutil>=5.9.0
+
+# ML & Evaluation
 transformers>=4.41.2
-sentencepiece>=0.2.0  # для tokenizerBPE моделей
-accelerate>=0.29.0    # ускорение инференса
+sentencepiece>=0.2.0
+accelerate>=0.29.0
 nltk>=3.8.1
 torch>=2.1
-rouge-score>=0.1.2    # ROUGE метрики для оценки суммаризации
-numpy>=1.24.0         # математические операции для тестов
+rouge-score>=0.1.2
+numpy>=1.24.0
+
+# Development tools
+ruff==0.4.4              # Linter & formatter
+mypy==1.10.0             # Type checker
+pytest==8.2.0           # Testing framework
+pytest-asyncio==0.23.6  # Async testing
+coverage==7.5.1          # Code coverage

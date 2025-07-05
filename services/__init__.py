@@ -1,24 +1,31 @@
-from logger import get_logger
-from .llm_analyzer import OllamaAnalyzer
-from .data_manager import DataManager
-from .tavily_search import TavilySearch
-from .telegram_monitor import TelegramMonitor
+"""Service package exports.
 
+Упрощено: выбор и инициализация `data_manager` происходит в `main.py`.
+Этот модуль предоставляет:
+    • llm_analyzer  – экземпляр LLM-анализа
+    • tavily_search – клиент веб-поиска
+    • telegram_monitor – мониторинг Telegram каналов
+    • data_manager  – заполняется во время запуска приложения
+"""
+
+from logger import get_logger
+
+from .llm.analyzer import OllamaAnalyzer
+from .tavily_search import TavilySearch
+from .telegram_monitor import telegram_monitor
+
+# Global singletons (data_manager будет инициализирован позднее)
 logger = get_logger()
 
-try:
-    llm_analyzer = OllamaAnalyzer()
-    data_manager = DataManager()
-    tavily_search = TavilySearch()
-    telegram_monitor = TelegramMonitor()
-    logger.info("Все сервисы успешно инициализированы.")
-except Exception as e:
-    logger.error(f"Критическая ошибка при инициализации сервисов: {e}", exc_info=True)
-    raise
+llm_analyzer = OllamaAnalyzer()
+tavily_search = TavilySearch()
+
+# Заполняется в точке входа после выбора реализации
+data_manager = None  # type: ignore
 
 __all__ = [
     "llm_analyzer",
-    "data_manager",
     "tavily_search",
     "telegram_monitor",
+    "data_manager",
 ]

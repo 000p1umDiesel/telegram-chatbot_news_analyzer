@@ -3,20 +3,35 @@ from aiogram import Dispatcher, types, F
 from aiogram.filters import Command, CommandObject
 from aiogram.enums import ParseMode
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from services import data_manager, llm_analyzer, tavily_search
-import config
+from services import llm_analyzer, tavily_search
+
+# data_manager импортируется динамически для избежания проблем с None
+
+
+# Старый get_data_manager удален - теперь используем get_simple_data_manager
+
+
+def get_simple_data_manager():
+    """Получает простой синхронный менеджер для бота."""
+    try:
+        from services.db.sync_pg_manager import get_sync_postgres_manager
+
+        return get_sync_postgres_manager()
+    except Exception as e:
+        logger.error(f"Ошибка получения синхронного менеджера: {e}")
+        return None
+
+
+from core.config import settings as config
 from logger import get_logger
 from typing import Dict, Any
+import asyncio
 
 # Импортируем новые утилиты
 from utils.error_handler import global_error_handler, ErrorCategory
 from utils.performance import performance_timer
-from utils.constants import (
-    SENTIMENT_EMOJI_MAP,
-    MAX_POPULAR_HASHTAGS_DISPLAY,
-    MAX_CHANNEL_TITLE_DISPLAY,
-    EMOJI_UNKNOWN,
-)
+from bot.notifier import send_analysis_result
+from bot import bot
 
 logger = get_logger()
 
@@ -35,7 +50,9 @@ def get_main_keyboard():
 
 def get_subscription_keyboard(chat_id: int):
     builder = InlineKeyboardBuilder()
-    if data_manager.is_subscriber(chat_id):
+    data_manager = get_simple_data_manager()
+
+    if data_manager and data_manager.is_subscriber(chat_id):
         builder.button(text="🔕 Отписаться от уведомлений", callback_data="unsubscribe")
         builder.button(text="📋 Мои подписки", callback_data="my_subscriptions")
     else:
@@ -106,15 +123,31 @@ async def process_callback_subscribe(callback_query: types.CallbackQuery):
     if not callback_query.message:
         await callback_query.answer("Не удалось определить чат.", show_alert=True)
         return
+
+    data_manager = get_simple_data_manager()
+    if not data_manager:
+        await callback_query.answer("❌ Сервис временно недоступен.", show_alert=True)
+        return
+
     chat_id = callback_query.message.chat.id
-    if data_manager.is_subscriber(chat_id):
-        await callback_query.answer("Этот чат уже подписан!")
-    else:
-        data_manager.add_subscriber(chat_id)
-        await callback_query.answer("✅ Чат успешно подписан на уведомления!")
-        await callback_query.message.edit_reply_markup(
-            reply_markup=get_subscription_keyboard(chat_id)
-        )
+    try:
+        if data_manager.is_subscriber(chat_id):
+            await callback_query.answer("Этот чат уже подписан!")
+        else:
+            data_manager.add_subscriber(chat_id)
+            await callback_query.answer("✅ Чат успешно подписан на уведомления!")
+            # Обновляем клавиатуру только если статус действительно изменился
+            try:
+                await callback_query.message.edit_reply_markup(
+                    reply_markup=get_subscription_keyboard(chat_id)
+                )
+            except Exception as e:
+                # Игнорируем ошибки "message is not modified"
+                if "message is not modified" not in str(e):
+                    logger.warning(f"Не удалось обновить клавиатуру: {e}")
+    except Exception as e:
+        logger.error(f"Ошибка при подписке пользователя {chat_id}: {e}")
+        await callback_query.answer("❌ Ошибка при подписке.", show_alert=True)
 
 
 @dp.callback_query(lambda c: c.data == "unsubscribe")
@@ -123,15 +156,31 @@ async def process_callback_unsubscribe(callback_query: types.CallbackQuery):
     if not callback_query.message:
         await callback_query.answer("Не удалось определить чат.", show_alert=True)
         return
+
+    data_manager = get_simple_data_manager()
+    if not data_manager:
+        await callback_query.answer("❌ Сервис временно недоступен.", show_alert=True)
+        return
+
     chat_id = callback_query.message.chat.id
-    if not data_manager.is_subscriber(chat_id):
-        await callback_query.answer("Этот чат и так не подписан.")
-    else:
-        data_manager.remove_subscriber(chat_id)
-        await callback_query.answer("✅ Чат успешно отписан от уведомлений.")
-        await callback_query.message.edit_reply_markup(
-            reply_markup=get_subscription_keyboard(chat_id)
-        )
+    try:
+        if not data_manager.is_subscriber(chat_id):
+            await callback_query.answer("Этот чат и так не подписан.")
+        else:
+            data_manager.remove_subscriber(chat_id)
+            await callback_query.answer("✅ Чат успешно отписан от уведомлений.")
+            # Обновляем клавиатуру только если статус действительно изменился
+            try:
+                await callback_query.message.edit_reply_markup(
+                    reply_markup=get_subscription_keyboard(chat_id)
+                )
+            except Exception as e:
+                # Игнорируем ошибки "message is not modified"
+                if "message is not modified" not in str(e):
+                    logger.warning(f"Не удалось обновить клавиатуру: {e}")
+    except Exception as e:
+        logger.error(f"Ошибка при отписке пользователя {chat_id}: {e}")
+        await callback_query.answer("❌ Ошибка при отписке.", show_alert=True)
 
 
 @dp.callback_query(lambda c: c.data == "my_subscriptions")
@@ -142,12 +191,13 @@ async def process_callback_my_subscriptions(callback_query: types.CallbackQuery)
         return
 
     chat_id = callback_query.message.chat.id
-    is_subscribed = data_manager.is_subscriber(chat_id)
+    data_manager = get_simple_data_manager()
+    is_subscribed = data_manager.is_subscriber(chat_id) if data_manager else False
 
     subscription_info = (
         f"📋 **Ваши подписки:**\n\n"
         f"🔔 Уведомления: {'✅ Включены' if is_subscribed else '❌ Отключены'}\n"
-        f"📺 Отслеживаемые каналы: {len(config.TELEGRAM_CHANNEL_IDS)}\n"
+        f"📺 Отслеживаемые каналы: {len(config.channel_ids)}\n"
         f"⏱ Интервал проверки: {config.CHECK_INTERVAL_SECONDS} сек."
     )
 
@@ -181,14 +231,17 @@ async def process_callback_system_stats(callback_query: types.CallbackQuery):
         cache_stats = llm_analyzer.get_cache_stats()
 
         # Получаем статистику подписчиков
-        subscribers_count = len(data_manager.get_all_subscribers())
+        data_manager = get_simple_data_manager()
+        subscribers_count = (
+            len(data_manager.get_all_subscribers()) if data_manager else 0
+        )
 
         system_info = (
             f"📊 **Системная статистика:**\n\n"
             f"👥 Подписчики: {subscribers_count}\n"
             f"💾 Кэш: {cache_stats['cache_size']}/{cache_stats['max_cache_size']} "
             f"({cache_stats['cache_usage_percent']:.1f}%)\n"
-            f"📺 Каналы: {len(config.TELEGRAM_CHANNEL_IDS)}\n"
+            f"📺 Каналы: {len(config.channel_ids)}\n"
             f"🤖 Модель: {config.OLLAMA_MODEL}\n"
             f"🔗 Ollama: {config.OLLAMA_BASE_URL}"
         )
@@ -211,7 +264,6 @@ async def cmd_help(message: types.Message):
         "`/help` - Показать эту справку\n"
         "`/stats` - Статистика анализа новостей\n"
         "`/subscribe` - Управление подпиской\n"
-        # "`/notifications` - Настройки уведомлений\n\n"
         "**Работа с ИИ:**\n"
         "`/chat <текст>` - Пообщаться с ИИ-ассистентом\n"
         "`/analyze <текст>` - Проанализировать текст\n"
@@ -240,12 +292,15 @@ async def cmd_status(message: types.Message):
     try:
         # Получаем статистику системы
         cache_stats = llm_analyzer.get_cache_stats()
-        subscribers_count = len(data_manager.get_all_subscribers())
+        data_manager = get_simple_data_manager()
+        subscribers_count = (
+            len(data_manager.get_all_subscribers()) if data_manager else 0
+        )
 
         status_text = (
             "✅ **Статус системы:**\n\n"
             f"🤖 **Бот:** Онлайн\n"
-            f"📺 **Каналы:** {', '.join(config.TELEGRAM_CHANNEL_IDS[:3])}{'...' if len(config.TELEGRAM_CHANNEL_IDS) > 3 else ''}\n"
+            f"📺 **Каналы:** {', '.join(config.channel_ids[:3])}{'...' if len(config.channel_ids) > 3 else ''}\n"
             f"🧠 **LLM модель:** {config.OLLAMA_MODEL}\n"
             f"👥 **Подписчики:** {subscribers_count}\n"
             f"💾 **Кэш:** {cache_stats['cache_size']} записей ({cache_stats['cache_usage_percent']:.1f}%)\n"
@@ -261,7 +316,8 @@ async def cmd_status(message: types.Message):
 async def cmd_stats(message: types.Message):
     await send_typing_action(message)
     try:
-        stats = data_manager.get_statistics()
+        data_manager = get_simple_data_manager()
+        stats = data_manager.get_statistics() if data_manager else None
         if not stats or stats.get("total_messages", 0) == 0:
             await message.answer(
                 "😔 **Пока нет данных для статистики.**\n\n"
@@ -397,7 +453,8 @@ async def cmd_trends(message: types.Message):
 
     try:
         # Простой анализ трендов на основе статистики
-        stats = data_manager.get_extended_statistics()
+        data_manager = get_simple_data_manager()
+        stats = data_manager.get_extended_statistics() if data_manager else {}
 
         if not stats.get("popular_hashtags"):
             await progress.edit_text("📊 Недостаточно данных для анализа трендов.")
@@ -433,14 +490,14 @@ async def cmd_digest(message: types.Message):
 
         today = date.today().isoformat()
 
-        with data_manager._lock, data_manager.conn:
-            # Получаем новости за сегодня
-            cur = data_manager.conn.execute(
+        # PostgresManager использует пул `psycopg_pool`, поэтому берем соединение
+        with data_manager.pool.connection() as conn:  # type: ignore[attr-defined]
+            cur = conn.execute(
                 """
                 SELECT a.summary, a.sentiment, a.hashtags, m.channel_title
                 FROM analyses a
                 JOIN messages m ON a.message_id = m.message_id
-                WHERE DATE(m.date) = ?
+                WHERE DATE(m.date) = %s
                 ORDER BY m.date DESC
                 LIMIT 10
             """,
@@ -756,7 +813,7 @@ def format_statistics_message(stats: Dict[str, Any]) -> str:
     neu_pct = (neutral / total * 100) if total > 0 else 0
 
     # Используем константу для ограничения количества хештегов
-    display_hashtags = hashtags[:MAX_POPULAR_HASHTAGS_DISPLAY]
+    display_hashtags = hashtags[: settings.MAX_POPULAR_HASHTAGS_DISPLAY]
     hashtags_str = (
         f"`{'`, `'.join(display_hashtags)}`" if display_hashtags else "нет данных"
     )
@@ -771,3 +828,67 @@ def format_statistics_message(stats: Dict[str, Any]) -> str:
         f"🏷️ **Популярные теги:**\n"
         f"{hashtags_str}"
     )
+
+
+# ---------------------------------------------------------------------------
+#  Обработчик входящих сообщений из каналов (Bot API),
+#  заменяет Telethon-мониторинг.
+# ---------------------------------------------------------------------------
+
+
+@dp.channel_post()
+async def handle_channel_post(message: types.Message):
+    """Обрабатывает новое сообщение в канале (Bot API)."""
+    if not message.text:
+        return  # пропускаем не-текстовые сообщения
+
+    channel_id = str(message.chat.id)
+    last_known_id = data_manager.get_last_message_id(channel_id)
+
+    # Пропускаем, если уже обработано (редкие дубликаты)
+    if message.message_id <= last_known_id:
+        return
+
+    # Сохраняем сырой текст и анализируем
+    raw_msg = {
+        "id": message.message_id,
+        "text": message.text,
+        "date": message.date.isoformat() if message.date else None,
+        "channel_id": channel_id,
+        "channel_title": message.chat.title or "Без названия",
+        "channel_username": message.chat.username,
+    }
+
+    try:
+        analysis = await llm_analyzer.analyze_message(message.text)
+        if analysis is None:
+            logger.warning(
+                "Не удалось проанализировать сообщение %s", message.message_id
+            )
+            return
+
+        # Persist
+        data_manager.save_message(raw_msg)
+        data_manager.save_analysis(message.message_id, analysis.dict())
+        data_manager.set_last_message_id(channel_id, message.message_id)
+
+        # Уведомляем подписчиков
+        message_link = (
+            f"https://t.me/{message.chat.username}/{message.message_id}"
+            if message.chat.username
+            else "N/A"
+        )
+
+        notify_data = {
+            "channel_title": raw_msg["channel_title"],
+            "message_link": message_link,
+            "summary": analysis.summary,
+            "sentiment": analysis.sentiment,
+            "hashtags_formatted": analysis.format_hashtags(),
+            "hashtags": analysis.hashtags,
+        }
+
+        await send_analysis_result(bot, notify_data)
+
+    except Exception as e:  # noqa: BLE001
+        logger.error("Ошибка обработки channel_post: %s", e, exc_info=True)

@@ -23,8 +23,8 @@ import sys
 sys.path.append(".")
 
 try:
-    from services.llm_analyzer import OllamaAnalyzer
-    from services.data_manager import DataManager
+    from services.llm import OllamaAnalyzer
+    from services.db.pg_manager import AsyncPostgresManager as DataManager
 
     SYSTEM_AVAILABLE = True
 except ImportError as e:

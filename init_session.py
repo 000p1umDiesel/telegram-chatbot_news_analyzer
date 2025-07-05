@@ -1,54 +1,72 @@
-# init_session.py
+#!/usr/bin/env python3
+"""
+Скрипт для инициализации Telegram сессии.
+Запустите этот скрипт один раз для авторизации в Telegram API.
+"""
+
 import asyncio
-from telethon import TelegramClient  # type: ignore
-import config
 import os
-from logger import get_logger
-from telethon.errors import SessionPasswordNeededError  # type: ignore
-
-logger = get_logger()
-
-# Этот скрипт нужно запустить один раз для создания файла сессии .sessions/telegram_session.session
-# Введите свои данные (номер телефона, код, пароль) в консоли при первом запуске.
+from telethon import TelegramClient
+from core.config import settings as config
 
 
 async def main():
-    logger.info("Запуск скрипта для создания сессии Telethon...")
-    if not config.TELEGRAM_API_ID or not config.TELEGRAM_API_HASH:
-        raise ValueError(
-            "TELEGRAM_API_ID и TELEGRAM_API_HASH должны быть установлены в .env"
-        )
+    """Инициализация Telegram сессии."""
+    print("🔐 Инициализация Telegram сессии...")
 
-    session_path = os.path.join(".sessions", "telegram_session")
-    os.makedirs(os.path.dirname(session_path), exist_ok=True)
+    # Проверяем наличие необходимых данных
+    if not config.TELEGRAM_API_ID or not config.TELEGRAM_API_HASH:
+        print(
+            "❌ Ошибка: TELEGRAM_API_ID и TELEGRAM_API_HASH должны быть установлены в .env"
+        )
+        return
+
+    if not config.TELEGRAM_PHONE:
+        print("❌ Ошибка: TELEGRAM_PHONE должен быть установлен в .env")
+        return
+
+    # Создаем директорию для сессий
+    os.makedirs(".sessions", exist_ok=True)
+
+    session_file = ".sessions/monitor_session"
 
     client = TelegramClient(
-        session_path, int(config.TELEGRAM_API_ID), config.TELEGRAM_API_HASH
+        session_file, int(config.TELEGRAM_API_ID), config.TELEGRAM_API_HASH
     )
 
-    await client.connect()
+    try:
+        print(f"📱 Подключение к Telegram с номером {config.TELEGRAM_PHONE}...")
+        await client.start(phone=config.TELEGRAM_PHONE)
 
-    if await client.is_user_authorized():
-        logger.info("Вы уже авторизованы. Файл сессии существует и валиден.")
-    else:
-        logger.info("Требуется авторизация.")
-        # Просим номер телефона. Telethon сам запросит код и пароль.
-        try:
-            await client.send_code_request(config.TELEGRAM_PHONE)
-            code = input("Введите код, полученный в Telegram: ")
-            try:
-                await client.sign_in(config.TELEGRAM_PHONE, code)
-            except SessionPasswordNeededError:
-                # Аккаунт защищён двухфакторной аутентификацией (пароль)
-                password = input("Введите пароль двухфакторной аутентификации: ")
-                await client.sign_in(password=password)
-        except Exception as auth_err:
-            logger.error(f"Не удалось завершить авторизацию: {auth_err}")
-            return
-        logger.info("Авторизация прошла успешно. Файл сессии создан.")
+        if await client.is_user_authorized():
+            print("✅ Авторизация успешна!")
 
-    await client.disconnect()
-    logger.info("Скрипт завершил работу.")
+            # Тестируем доступ к каналам
+            print(f"🔍 Проверка доступа к каналам: {config.channel_ids}")
+
+            for channel_id in config.channel_ids:
+                try:
+                    if channel_id.startswith("@"):
+                        entity = await client.get_entity(channel_id)
+                    elif channel_id.startswith("-"):
+                        entity = await client.get_entity(int(channel_id))
+                    else:
+                        entity = await client.get_entity(channel_id)
+
+                    print(f"  ✅ {channel_id} - {getattr(entity, 'title', 'Unknown')}")
+                except Exception as e:
+                    print(f"  ❌ {channel_id} - Ошибка: {e}")
+
+            print(
+                "\n🎉 Инициализация завершена! Теперь можно запускать основное приложение."
+            )
+        else:
+            print("❌ Авторизация не удалась")
+
+    except Exception as e:
+        print(f"❌ Ошибка инициализации: {e}")
+    finally:
+        await client.disconnect()
 
 
 if __name__ == "__main__":

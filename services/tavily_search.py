@@ -1,7 +1,7 @@
 import aiohttp
 from typing import List, Dict, Any, Optional
 from logger import get_logger
-import config
+from core.config import settings as config
 
 logger = get_logger()
 

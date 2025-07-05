@@ -27,8 +27,6 @@ venv/
 .envrc
 .env.*
 .env
-.sessions
-.sessions/*
 
 # Distribution / packaging
 .Python
@@ -53,7 +51,12 @@ htmlcov/
 # =====================================
 logs/
 *.log
-data/
+
+# ruff
+.ruff_cache/
+*.ruff_cache/
+.ruff_cache
+*.ruff_cache
 
 # =====================================
 # Editor & IDE folders

@@ -1,7 +1,7 @@
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-import config
+from core.config import settings as config
 
 # Единственный экземпляр бота
 bot = Bot(

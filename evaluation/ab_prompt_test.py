@@ -21,7 +21,7 @@ import sys
 sys.path.append(".")
 
 try:
-    from services.llm_analyzer import OllamaAnalyzer
+    from services.llm import OllamaAnalyzer
 
     SYSTEM_AVAILABLE = True
 except ImportError as e:

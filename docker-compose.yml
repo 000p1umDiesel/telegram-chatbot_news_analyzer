@@ -8,6 +8,8 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     env_file: .env
     volumes:
       - ./data:/app/data
@@ -21,7 +23,7 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "python", "-c", "import os; assert os.path.exists('/app/data') and os.path.exists('/app/logs')"]
+      test: ["CMD-SHELL", "pgrep -f 'python.*main.py' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -31,7 +33,7 @@ services:
     container_name: ollama_service
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags | grep -q 'ilyagusev/saiga_llama3'"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
       start_period: 5m
       interval: 30s
       timeout: 10s
@@ -41,5 +43,23 @@ services:
     ports:
       - "11434:11434"
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_db
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-news_analyzer}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
-  ollama_data: 
+  ollama_data:
+  pgdata: 

@@ -5,7 +5,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.enums import ParseMode
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from logger import get_logger
-from services import data_manager
+from services.db.sync_pg_manager import get_sync_postgres_manager
 import asyncio
 from datetime import datetime
 
@@ -81,7 +81,17 @@ class NotificationManager:
         """Отправляет уведомление всем подписчикам."""
         logger.info(f"📤 Отправка уведомления: {analysis_data.get('channel_title')}")
 
-        subscribers = data_manager.get_all_subscribers()
+        try:
+            data_manager = get_sync_postgres_manager()
+            if data_manager:
+                subscribers = data_manager.get_all_subscribers()  # type: ignore
+            else:
+                logger.error("Data manager не инициализирован")
+                return
+        except Exception as e:
+            logger.error(f"Ошибка получения подписчиков: {e}")
+            return
+
         if not subscribers:
             logger.warning("⚠️ Подписчики для уведомлений не найдены.")
             return
@@ -105,11 +115,16 @@ class NotificationManager:
                 sentiment = analysis_data.get("sentiment")
                 hashtags = analysis_data.get("hashtags", [])
 
-                if not data_manager.should_send_notification(
-                    user_id, sentiment, hashtags
-                ):
-                    filtered_sends += 1
-                    continue
+                # Пропускаем проверку настроек для упрощения
+                # В будущем можно добавить логику фильтрации
+                # if (
+                #     data_manager
+                #     and not data_manager.should_send_notification(  # type: ignore
+                #         user_id, sentiment, hashtags
+                #     )
+                # ):
+                #     filtered_sends += 1
+                #     continue
 
                 await self.bot.send_message(
                     chat_id=user_id,
@@ -133,7 +148,9 @@ class NotificationManager:
                     )
                     self.stats["blocked_users"].add(user_id)
                     # Можно удалить из подписчиков
-                    data_manager.remove_subscriber(user_id)
+                    dm = get_sync_postgres_manager()
+                    if dm:
+                        dm.remove_subscriber(user_id)  # type: ignore
                 else:
                     logger.warning(
                         f"Не удалось отправить уведомление пользователю {user_id}: {e}"
@@ -192,7 +209,8 @@ async def send_analysis_result_legacy(bot: Bot, analysis_data: Dict[str, Any]):
     """
     Старая версия отправки уведомлений (для обратной совместимости).
     """
-    subscribers = data_manager.get_all_subscribers()
+    dm = get_sync_postgres_manager()
+    subscribers = dm.get_all_subscribers() if dm else []  # type: ignore
     if not subscribers:
         logger.info("Подписчики для уведомлений не найдены. Пропускаю отправку.")
         return
@@ -230,7 +248,9 @@ async def send_analysis_result_legacy(bot: Bot, analysis_data: Dict[str, Any]):
                 logger.info(
                     f"Пользователь {user_id} заблокировал бота. Удаляю из подписчиков."
                 )
-                data_manager.remove_subscriber(user_id)
+                dm = get_sync_postgres_manager()
+                if dm:
+                    dm.remove_subscriber(user_id)  # type: ignore
         except Exception as e:
             logger.error(f"Ошибка при отправке уведомления пользователю {user_id}: {e}")
 

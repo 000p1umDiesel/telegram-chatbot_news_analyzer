@@ -57,7 +57,7 @@ class ErrorHandler:
         # Ошибки базы данных
         if any(
             keyword in error_msg
-            for keyword in ["database", "sqlite", "sql", "table", "column"]
+            for keyword in ["database", "sql", "table", "column", "postgres"]
         ):
             return ErrorCategory.DATABASE
 
@@ -76,6 +76,7 @@ class ErrorHandler:
                 "bot was blocked",
                 "chat not found",
                 "message not modified",
+                "flood wait",
             ]
         ):
             return ErrorCategory.TELEGRAM_API
@@ -159,81 +160,97 @@ def retry_with_backoff(
         config = RetryConfig()
 
     def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            error_handler = ErrorHandler()
-            last_exception = None
+        if asyncio.iscoroutinefunction(func):
 
-            for attempt in range(config.max_attempts):
-                try:
-                    return await func(*args, **kwargs)
-                except exceptions as e:
-                    last_exception = e
-                    error_handler.handle_error(
-                        e,
-                        f"Attempt {attempt + 1}/{config.max_attempts} for {func.__name__}",
-                        category,
-                    )
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                error_handler = ErrorHandler()
+                last_exception: Optional[Exception] = None
 
-                    if attempt < config.max_attempts - 1:
-                        delay = min(
-                            config.base_delay * (config.exponential_base**attempt),
-                            config.max_delay,
+                for attempt in range(config.max_attempts):
+                    try:
+                        return await func(*args, **kwargs)
+                    except exceptions as e:
+                        last_exception = e
+                        error_handler.handle_error(
+                            e,
+                            f"Attempt {attempt + 1}/{config.max_attempts} for {func.__name__}",
+                            category,
                         )
 
-                        if config.jitter:
-                            import random
+                        if attempt < config.max_attempts - 1:
+                            delay = min(
+                                config.base_delay * (config.exponential_base**attempt),
+                                config.max_delay,
+                            )
 
-                            delay *= 0.5 + random.random() * 0.5
+                            if config.jitter:
+                                import random
 
-                        logger.info(f"Retrying {func.__name__} in {delay:.2f}s...")
-                        await asyncio.sleep(delay)
+                                delay *= 0.5 + random.random() * 0.5
 
-            # Если все попытки неудачны
-            logger.error(
-                f"All {config.max_attempts} attempts failed for {func.__name__}"
-            )
-            raise last_exception
+                            logger.info(f"Retrying {func.__name__} in {delay:.2f}s...")
+                            await asyncio.sleep(delay)
 
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            error_handler = ErrorHandler()
-            last_exception = None
-
-            for attempt in range(config.max_attempts):
-                try:
-                    return func(*args, **kwargs)
-                except exceptions as e:
-                    last_exception = e
-                    error_handler.handle_error(
-                        e,
-                        f"Attempt {attempt + 1}/{config.max_attempts} for {func.__name__}",
-                        category,
+                # Если все попытки неудачны
+                logger.error(
+                    f"All {config.max_attempts} attempts failed for {func.__name__}"
+                )
+                if last_exception:
+                    raise last_exception
+                else:
+                    raise RuntimeError(
+                        f"Function {func.__name__} failed without exception"
                     )
 
-                    if attempt < config.max_attempts - 1:
-                        delay = min(
-                            config.base_delay * (config.exponential_base**attempt),
-                            config.max_delay,
+            return async_wrapper
+        else:
+
+            @wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                error_handler = ErrorHandler()
+                last_exception: Optional[Exception] = None
+
+                for attempt in range(config.max_attempts):
+                    try:
+                        return func(*args, **kwargs)
+                    except exceptions as e:
+                        last_exception = e
+                        error_handler.handle_error(
+                            e,
+                            f"Attempt {attempt + 1}/{config.max_attempts} for {func.__name__}",
+                            category,
                         )
 
-                        if config.jitter:
-                            import random
+                        if attempt < config.max_attempts - 1:
+                            delay = min(
+                                config.base_delay * (config.exponential_base**attempt),
+                                config.max_delay,
+                            )
 
-                            delay *= 0.5 + random.random() * 0.5
+                            if config.jitter:
+                                import random
 
-                        logger.info(f"Retrying {func.__name__} in {delay:.2f}s...")
-                        time.sleep(delay)
+                                delay *= 0.5 + random.random() * 0.5
 
-            logger.error(
-                f"All {config.max_attempts} attempts failed for {func.__name__}"
-            )
-            raise last_exception
+                            logger.info(f"Retrying {func.__name__} in {delay:.2f}s...")
+                            time.sleep(delay)
 
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+                # Если все попытки неудачны
+                logger.error(
+                    f"All {config.max_attempts} attempts failed for {func.__name__}"
+                )
+                if last_exception:
+                    raise last_exception
+                else:
+                    raise RuntimeError(
+                        f"Function {func.__name__} failed without exception"
+                    )
+
+            return sync_wrapper
 
     return decorator
 
 
-# Глобальный экземпляр error handler
+# Глобальный экземпляр обработчика ошибок
 global_error_handler = ErrorHandler()

@@ -1,12 +1,11 @@
 # monitoring_service.py
 import asyncio
 from logger import get_logger
-import config
-from services import data_manager, llm_analyzer, telegram_monitor
+from core.config import settings as config
+from services import llm_analyzer, telegram_monitor
 from bot import send_analysis_result
 from aiogram import Bot
 from typing import List, Dict, Any
-from concurrent.futures import ThreadPoolExecutor
 import time
 
 # Импортируем новые утилиты
@@ -16,19 +15,23 @@ from utils.error_handler import (
     ErrorCategory,
     global_error_handler,
 )
-from utils.performance import performance_timer, global_performance_monitor
-from utils.constants import DEFAULT_CHECK_INTERVAL_SECONDS, MAX_CONCURRENT_REQUESTS
+from utils.performance import performance_timer
 
 logger = get_logger()
 
 
 class MonitoringService:
-    def __init__(self, bot: Bot, max_concurrent_tasks: int = MAX_CONCURRENT_REQUESTS):
+    def __init__(
+        self,
+        bot: Bot,
+        data_manager,
+        max_concurrent_tasks: int = config.MAX_CONCURRENT_REQUESTS,
+    ):
         self.bot = bot
         self.monitor = telegram_monitor
         self.analyzer = llm_analyzer
         self.data_manager = data_manager
-        self.channel_ids = config.TELEGRAM_CHANNEL_IDS
+        self.channel_ids = config.channel_ids
         self.max_concurrent_tasks = max_concurrent_tasks
         self.semaphore = asyncio.Semaphore(max_concurrent_tasks)
         self.stats = {
@@ -49,6 +52,10 @@ class MonitoringService:
         async with self.semaphore:
             async with performance_timer(f"process_message_{channel_id}"):
                 try:
+                    if not self.data_manager:
+                        logger.error("Data manager не инициализирован")
+                        return False
+
                     analysis = await self.analyzer.analyze_message(message["text"])
                     if not analysis:
                         logger.warning(
@@ -57,8 +64,10 @@ class MonitoringService:
                         self.stats["failed_messages"] += 1
                         return False
 
-                    self.data_manager.save_message(message)
-                    self.data_manager.save_analysis(message["id"], analysis.dict())
+                    await self.data_manager.save_message(message)
+                    await self.data_manager.save_analysis(
+                        message["id"], analysis.dict()
+                    )
 
                     # Формируем и отправляем уведомление
                     message_link = (
@@ -77,8 +86,8 @@ class MonitoringService:
                     }
                     await send_analysis_result(self.bot, notification_data)
 
-                    # Обновляем ID последнего сообщения для этого канала
-                    self.data_manager.set_last_message_id(channel_id, message["id"])
+                    # НЕ обновляем ID здесь - это будет сделано в _process_channel
+                    # после успешной обработки всех сообщений в батче
                     self.stats["processed_messages"] += 1
                     return True
 
@@ -95,8 +104,12 @@ class MonitoringService:
         """Обрабатывает один канал: получает и анализирует новые сообщения."""
         logger.info(f"Проверка канала: {channel_id}")
         try:
+            if not self.data_manager:
+                logger.error("Data manager не инициализирован")
+                return
+
             # Получаем ID последнего обработанного сообщения для этого канала
-            last_message_id = self.data_manager.get_last_message_id(channel_id)
+            last_message_id = await self.data_manager.get_last_message_id(channel_id)
             if last_message_id == 0:
                 logger.info(
                     f"Последний ID для '{channel_id}' не найден, получаем с канала..."
@@ -108,7 +121,9 @@ class MonitoringService:
                     logger.info(
                         f"Канал '{channel_id}' инициализирован с ID: {last_message_id}. Сохраняем в базу."
                     )
-                    self.data_manager.set_last_message_id(channel_id, last_message_id)
+                    await self.data_manager.set_last_message_id(
+                        channel_id, last_message_id
+                    )
                     # Пропускаем первую итерацию, чтобы не дублировать последнее сообщение
                     return
 
@@ -133,6 +148,22 @@ class MonitoringService:
             # Подсчитываем результаты
             successful = sum(1 for result in results if result is True)
             failed = len(results) - successful
+
+            # КРИТИЧНО: Обновляем ID последнего сообщения ТОЛЬКО если ВСЕ сообщения обработаны успешно
+            if failed == 0 and messages:
+                # Находим максимальный ID среди обработанных сообщений
+                max_processed_id = max(msg["id"] for msg in messages)
+                await self.data_manager.set_last_message_id(
+                    channel_id, max_processed_id
+                )
+                logger.info(
+                    f"Канал '{channel_id}': обновлен last_message_id до {max_processed_id}"
+                )
+            elif failed > 0:
+                logger.warning(
+                    f"Канал '{channel_id}': НЕ обновляем last_message_id из-за {failed} ошибок. "
+                    f"Пропущенные сообщения будут обработаны в следующем цикле."
+                )
 
             logger.info(
                 f"Канал '{channel_id}': обработано {successful}/{len(messages)} сообщений, "
