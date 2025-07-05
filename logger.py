@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 # Создаем директорию для логов, если её нет
-LOGS_DIR = "logs"
+LOGS_DIR = ".logs"
 if not os.path.exists(LOGS_DIR):
     os.makedirs(LOGS_DIR)
 

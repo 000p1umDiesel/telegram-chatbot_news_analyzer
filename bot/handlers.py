@@ -1,14 +1,20 @@
-# handlers.py
+# handlers.py - Улучшенный интерфейс бота с клавишами и фильтрами
+import asyncio
 from aiogram import Dispatcher, types, F
 from aiogram.filters import Command, CommandObject
 from aiogram.enums import ParseMode
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from services import llm_analyzer, tavily_search
 
-# data_manager импортируется динамически для избежания проблем с None
+from core.config import settings as config
+from logger import get_logger
+from typing import Dict, Any, List
 
+from bot.notifier import send_analysis_result
+from bot import bot
 
-# Старый get_data_manager удален - теперь используем get_simple_data_manager
+logger = get_logger()
+dp = Dispatcher()
 
 
 def get_simple_data_manager():
@@ -22,41 +28,34 @@ def get_simple_data_manager():
         return None
 
 
-from core.config import settings as config
-from logger import get_logger
-from typing import Dict, Any
-import asyncio
-
-# Импортируем новые утилиты
-from utils.error_handler import global_error_handler, ErrorCategory
-from utils.performance import performance_timer
-from bot.notifier import send_analysis_result
-from bot import bot
-
-logger = get_logger()
-
-dp = Dispatcher()
-
-
 def get_main_keyboard():
-    """Создает основную клавиатуру с одной кнопкой подписки."""
+    """Создает основную клавиатуру с удобными кнопками."""
     builder = ReplyKeyboardBuilder()
     builder.add(
+        types.KeyboardButton(text="📊 Статистика"),
         types.KeyboardButton(text="🔔 Подписка"),
+        types.KeyboardButton(text="⚙️ Настройки"),
+        types.KeyboardButton(text="📈 Тренды"),
+        types.KeyboardButton(text="💬 Чат с ИИ"),
+        types.KeyboardButton(text="🔍 Поиск"),
+        types.KeyboardButton(text="📰 Дайджест"),
+        types.KeyboardButton(text="ℹ️ Помощь"),
     )
-    builder.adjust(1)
+    builder.adjust(2, 2, 2, 2)
     return builder.as_markup(resize_keyboard=True)
 
 
 def get_subscription_keyboard(chat_id: int):
+    """Создает клавиатуру управления подпиской."""
     builder = InlineKeyboardBuilder()
     data_manager = get_simple_data_manager()
 
     if data_manager and data_manager.is_subscriber(chat_id):
-        builder.button(text="🔕 Отписаться от уведомлений", callback_data="unsubscribe")
-        builder.button(text="📋 Мои подписки", callback_data="my_subscriptions")
+        builder.button(text="🔕 Отписаться", callback_data="unsubscribe")
+        builder.button(text="📋 Мои настройки", callback_data="my_settings")
     else:
-        builder.button(text="🔔 Подписаться на уведомления", callback_data="subscribe")
+        builder.button(text="🔔 Подписаться", callback_data="subscribe")
+
     builder.adjust(1)
     return builder.as_markup()
 
@@ -68,20 +67,25 @@ def get_settings_keyboard():
         types.InlineKeyboardButton(
             text="📊 Статистика системы", callback_data="system_stats"
         ),
-        types.InlineKeyboardButton(text="🗑 Очистить кэш", callback_data="clear_cache"),
         types.InlineKeyboardButton(
-            text="📋 Мои подписки", callback_data="my_subscriptions"
+            text="🔔 Настройки уведомлений", callback_data="notification_settings"
         ),
+        types.InlineKeyboardButton(
+            text="🎭 Фильтр тональности", callback_data="sentiment_filter"
+        ),
+        types.InlineKeyboardButton(
+            text="📺 Фильтр каналов", callback_data="channel_filter"
+        ),
+        types.InlineKeyboardButton(text="🗑 Очистить кэш", callback_data="clear_cache"),
     )
-    builder.adjust(1)
+    builder.adjust(2)
     return builder.as_markup()
 
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    """Отправляет приветственное сообщение и предлагает подписаться на рассылку."""
+    """Отправляет приветственное сообщение."""
     if not message.chat:
-        logger.warning("Получена команда /start без информации о чате.")
         return
 
     chat_id = message.chat.id
@@ -94,16 +98,16 @@ async def cmd_start(message: types.Message):
         "• 📰 Анализ новостей из Telegram-каналов\n"
         "• 🎯 Определение тональности и тематики\n"
         "• 💬 Общение с ИИ-ассистентом\n"
-        "• 🔍 Поиск информации в интернете\n\n"
-        "📋 **Для настройки используйте команду** `/help`\n\n"
-        "👇 **Начните с подписки на уведомления:**"
+        "• 🔍 Поиск информации в интернете\n"
+        "• 📊 Статистика и тренды\n"
+        "• ⚙️ Настройки уведомлений\n\n"
+        "👇 **Используйте кнопки для навигации:**"
     )
 
     await message.answer(
         welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard()
     )
 
-    # Показываем кнопки подписки
     await message.answer(
         "🔔 **Управление подпиской:**",
         parse_mode=ParseMode.MARKDOWN,
@@ -111,175 +115,534 @@ async def cmd_start(message: types.Message):
     )
 
 
+# Обработчики кнопок основного меню
+@dp.message(F.text == "📊 Статистика")
+async def handle_stats_button(message: types.Message):
+    await cmd_stats(message)
+
+
 @dp.message(F.text == "🔔 Подписка")
 async def handle_subscription_button(message: types.Message):
-    """Обрабатывает нажатие кнопки Подписка."""
     await cmd_subscribe(message)
 
 
-@dp.callback_query(lambda c: c.data == "subscribe")
+@dp.message(F.text == "⚙️ Настройки")
+async def handle_settings_button(message: types.Message):
+    await cmd_settings(message)
+
+
+@dp.message(F.text == "📈 Тренды")
+async def handle_trends_button(message: types.Message):
+    await cmd_trends(message)
+
+
+@dp.message(F.text == "💬 Чат с ИИ")
+async def handle_chat_button(message: types.Message):
+    await message.answer(
+        "💬 **Чат с ИИ-ассистентом**\n\n"
+        "Просто напишите мне что-нибудь, и я отвечу!\n"
+        "Или используйте команду `/chat <ваш вопрос>`",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+@dp.message(F.text == "🔍 Поиск")
+async def handle_search_button(message: types.Message):
+    await message.answer(
+        "🔍 **Поиск в интернете**\n\n"
+        "Используйте команду `/web <поисковый запрос>`\n\n"
+        "Пример: `/web новости технологий`",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+@dp.message(F.text == "📰 Дайджест")
+async def handle_digest_button(message: types.Message):
+    await cmd_digest(message)
+
+
+@dp.message(F.text == "ℹ️ Помощь")
+async def handle_help_button(message: types.Message):
+    await cmd_help(message)
+
+
+# Callback handlers
+@dp.callback_query(F.data == "subscribe")
 async def process_callback_subscribe(callback_query: types.CallbackQuery):
-    """Обрабатывает нажатие на кнопку 'Подписаться'."""
+    """Обрабатывает подписку."""
+    await callback_query.answer()
+
     if not callback_query.message:
-        await callback_query.answer("Не удалось определить чат.", show_alert=True)
         return
 
     data_manager = get_simple_data_manager()
     if not data_manager:
-        await callback_query.answer("❌ Сервис временно недоступен.", show_alert=True)
+        await callback_query.message.answer("❌ Сервис временно недоступен.")
         return
 
     chat_id = callback_query.message.chat.id
     try:
         if data_manager.is_subscriber(chat_id):
-            await callback_query.answer("Этот чат уже подписан!")
+            await callback_query.message.answer("✅ Вы уже подписаны!")
         else:
             data_manager.add_subscriber(chat_id)
-            await callback_query.answer("✅ Чат успешно подписан на уведомления!")
-            # Обновляем клавиатуру только если статус действительно изменился
-            try:
-                await callback_query.message.edit_reply_markup(
-                    reply_markup=get_subscription_keyboard(chat_id)
-                )
-            except Exception as e:
-                # Игнорируем ошибки "message is not modified"
-                if "message is not modified" not in str(e):
-                    logger.warning(f"Не удалось обновить клавиатуру: {e}")
+            await callback_query.message.answer("✅ Подписка оформлена!")
     except Exception as e:
         logger.error(f"Ошибка при подписке пользователя {chat_id}: {e}")
-        await callback_query.answer("❌ Ошибка при подписке.", show_alert=True)
+        await callback_query.message.answer("❌ Ошибка при подписке.")
 
 
-@dp.callback_query(lambda c: c.data == "unsubscribe")
+@dp.callback_query(F.data == "unsubscribe")
 async def process_callback_unsubscribe(callback_query: types.CallbackQuery):
-    """Обрабатывает нажатие на кнопку 'Отписаться'."""
+    """Обрабатывает отписку."""
+    await callback_query.answer()
+
     if not callback_query.message:
-        await callback_query.answer("Не удалось определить чат.", show_alert=True)
         return
 
     data_manager = get_simple_data_manager()
     if not data_manager:
-        await callback_query.answer("❌ Сервис временно недоступен.", show_alert=True)
+        await callback_query.message.answer("❌ Сервис временно недоступен.")
         return
 
     chat_id = callback_query.message.chat.id
     try:
         if not data_manager.is_subscriber(chat_id):
-            await callback_query.answer("Этот чат и так не подписан.")
+            await callback_query.message.answer("❌ Вы не подписаны.")
         else:
             data_manager.remove_subscriber(chat_id)
-            await callback_query.answer("✅ Чат успешно отписан от уведомлений.")
-            # Обновляем клавиатуру только если статус действительно изменился
-            try:
-                await callback_query.message.edit_reply_markup(
-                    reply_markup=get_subscription_keyboard(chat_id)
-                )
-            except Exception as e:
-                # Игнорируем ошибки "message is not modified"
-                if "message is not modified" not in str(e):
-                    logger.warning(f"Не удалось обновить клавиатуру: {e}")
+            await callback_query.message.answer("✅ Отписка выполнена.")
     except Exception as e:
         logger.error(f"Ошибка при отписке пользователя {chat_id}: {e}")
-        await callback_query.answer("❌ Ошибка при отписке.", show_alert=True)
+        await callback_query.message.answer("❌ Ошибка при отписке.")
 
 
-@dp.callback_query(lambda c: c.data == "my_subscriptions")
-async def process_callback_my_subscriptions(callback_query: types.CallbackQuery):
-    """Показывает информацию о подписках пользователя."""
+@dp.callback_query(F.data == "my_settings")
+async def process_callback_my_settings(callback_query: types.CallbackQuery):
+    """Показывает настройки пользователя."""
+    await callback_query.answer()
+
     if not callback_query.message:
-        await callback_query.answer("Ошибка обработки запроса.", show_alert=True)
         return
 
     chat_id = callback_query.message.chat.id
     data_manager = get_simple_data_manager()
-    is_subscribed = data_manager.is_subscriber(chat_id) if data_manager else False
 
-    subscription_info = (
-        f"📋 **Ваши подписки:**\n\n"
-        f"🔔 Уведомления: {'✅ Включены' if is_subscribed else '❌ Отключены'}\n"
-        f"📺 Отслеживаемые каналы: {len(config.channel_ids)}\n"
-        f"⏱ Интервал проверки: {config.CHECK_INTERVAL_SECONDS} сек."
-    )
+    if data_manager:
+        settings = data_manager.get_user_settings(chat_id)
+        is_subscribed = data_manager.is_subscriber(chat_id)
 
-    await callback_query.answer()
-    await callback_query.message.answer(
-        subscription_info, parse_mode=ParseMode.MARKDOWN
-    )
+        text = (
+            f"📋 **Ваши настройки:**\n\n"
+            f"🔔 Подписка: {'✅ Активна' if is_subscribed else '❌ Неактивна'}\n"
+            f"🎭 Фильтр тональности: {settings.get('sentiment_filter', 'all')}\n"
+            f"📺 Отслеживаемые каналы: {len(config.channel_ids)}\n"
+            f"🌐 Язык: {settings.get('language', 'ru')}\n"
+        )
+
+        await callback_query.message.answer(text, parse_mode=ParseMode.MARKDOWN)
 
 
-@dp.callback_query(lambda c: c.data == "clear_cache")
+@dp.callback_query(F.data == "clear_cache")
 async def process_callback_clear_cache(callback_query: types.CallbackQuery):
-    """Очищает кэш анализатора."""
+    """Очищает кэш."""
+    await callback_query.answer("✅ Кэш очищен!")
     try:
-        cache_stats_before = llm_analyzer.get_cache_stats()
         llm_analyzer.clear_cache()
-
-        await callback_query.answer(
-            f"✅ Кэш очищен! Освобождено {cache_stats_before['cache_size']} записей.",
-            show_alert=True,
-        )
     except Exception as e:
-        logger.error(f"Ошибка при очистке кэша: {e}")
-        await callback_query.answer("❌ Ошибка при очистке кэша.", show_alert=True)
+        logger.error(f"Ошибка очистки кэша: {e}")
 
 
-@dp.callback_query(lambda c: c.data == "system_stats")
-async def process_callback_system_stats(callback_query: types.CallbackQuery):
-    """Показывает системную статистику."""
+@dp.callback_query(F.data == "notification_settings")
+async def process_callback_notification_settings(callback_query: types.CallbackQuery):
+    """Показывает настройки уведомлений."""
+    await callback_query.answer()
+    
+    if not callback_query.message:
+        return
+    
+    chat_id = callback_query.message.chat.id
+    data_manager = get_simple_data_manager()
+    
+    if not data_manager:
+        await callback_query.message.answer("❌ Сервис временно недоступен.")
+        return
+    
+    settings = data_manager.get_user_settings(chat_id)
+    
+    # Создаем клавиатуру для настроек уведомлений
+    builder = InlineKeyboardBuilder()
+    current_enabled = settings.get('notification_enabled', True)
+    
+    builder.add(
+        types.InlineKeyboardButton(
+            text=f"🔔 Уведомления: {'✅ Вкл' if current_enabled else '❌ Выкл'}",
+            callback_data=f"toggle_notifications_{not current_enabled}"
+        )
+    )
+    
+    text = (
+        "🔔 **Настройки уведомлений:**\n\n"
+        f"Текущий статус: {'✅ Включены' if current_enabled else '❌ Выключены'}\n\n"
+        "Нажмите кнопку для изменения:"
+    )
+    
+    await callback_query.message.answer(
+        text, 
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=builder.as_markup()
+    )
+
+
+@dp.callback_query(F.data.startswith("toggle_notifications_"))
+async def process_toggle_notifications(callback_query: types.CallbackQuery):
+    """Переключает уведомления."""
+    await callback_query.answer()
+    
+    if not callback_query.message:
+        return
+    
+    chat_id = callback_query.message.chat.id
+    data_manager = get_simple_data_manager()
+    
+    if not data_manager:
+        await callback_query.message.answer("❌ Сервис временно недоступен.")
+        return
+    
+    # Извлекаем новое значение из callback_data
+    new_value = callback_query.data.split("_")[-1] == "True"
+    
+    # Обновляем настройки
+    success = data_manager.update_user_settings(chat_id, {
+        'notification_enabled': new_value
+    })
+    
+    if success:
+        status_text = "включены" if new_value else "выключены"
+        await callback_query.message.answer(
+            f"✅ Уведомления {status_text}!",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await callback_query.message.answer("❌ Ошибка обновления настроек.")
+
+
+@dp.callback_query(F.data == "sentiment_filter")
+async def process_callback_sentiment_filter(callback_query: types.CallbackQuery):
+    """Показывает фильтр тональности."""
+    await callback_query.answer()
+    
+    if not callback_query.message:
+        return
+    
+    chat_id = callback_query.message.chat.id
+    data_manager = get_simple_data_manager()
+    
+    if not data_manager:
+        await callback_query.message.answer("❌ Сервис временно недоступен.")
+        return
+    
+    settings = data_manager.get_user_settings(chat_id)
+    current_filter = settings.get('sentiment_filter', 'all')
+    
+    # Создаем клавиатуру для фильтра тональности
+    builder = InlineKeyboardBuilder()
+    
+    filters = [
+        ('all', 'Все новости'),
+        ('Позитивная', '😊 Позитивные'),
+        ('Негативная', '😔 Негативные'),
+        ('Нейтральная', '😐 Нейтральные')
+    ]
+    
+    for filter_value, filter_name in filters:
+        is_current = filter_value == current_filter
+        button_text = f"{'✅ ' if is_current else ''}{filter_name}"
+        builder.add(
+            types.InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"set_sentiment_{filter_value}"
+            )
+        )
+    
+    builder.adjust(1)
+    
+    text = (
+        "🎭 **Фильтр тональности:**\n\n"
+        f"Текущий фильтр: {dict(filters)[current_filter]}\n\n"
+        "Выберите тип новостей для получения:"
+    )
+    
+    await callback_query.message.answer(
+        text, 
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=builder.as_markup()
+    )
+
+
+@dp.callback_query(F.data.startswith("set_sentiment_"))
+async def process_set_sentiment(callback_query: types.CallbackQuery):
+    """Устанавливает фильтр тональности."""
+    await callback_query.answer()
+    
+    if not callback_query.message:
+        return
+    
+    chat_id = callback_query.message.chat.id
+    data_manager = get_simple_data_manager()
+    
+    if not data_manager:
+        await callback_query.message.answer("❌ Сервис временно недоступен.")
+        return
+    
+    # Извлекаем значение фильтра
+    sentiment_filter = callback_query.data.replace("set_sentiment_", "")
+    
+    # Обновляем настройки
+    success = data_manager.update_user_settings(chat_id, {
+        'sentiment_filter': sentiment_filter
+    })
+    
+    if success:
+        filter_names = {
+            'all': 'все новости',
+            'Позитивная': 'позитивные новости',
+            'Негативная': 'негативные новости',
+            'Нейтральная': 'нейтральные новости'
+        }
+        await callback_query.message.answer(
+            f"✅ Фильтр установлен: {filter_names.get(sentiment_filter, sentiment_filter)}!",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await callback_query.message.answer("❌ Ошибка обновления настроек.")
+
+
+@dp.callback_query(F.data == "channel_filter")
+async def process_callback_channel_filter(callback_query: types.CallbackQuery):
+    """Показывает фильтр каналов."""
+    await callback_query.answer()
+    
+    if not callback_query.message:
+        return
+    
+    # Получаем список отслеживаемых каналов
     try:
-        # Получаем статистику кэша
-        cache_stats = llm_analyzer.get_cache_stats()
-
-        # Получаем статистику подписчиков
-        data_manager = get_simple_data_manager()
-        subscribers_count = (
-            len(data_manager.get_all_subscribers()) if data_manager else 0
-        )
-
-        system_info = (
-            f"📊 **Системная статистика:**\n\n"
-            f"👥 Подписчики: {subscribers_count}\n"
-            f"💾 Кэш: {cache_stats['cache_size']}/{cache_stats['max_cache_size']} "
-            f"({cache_stats['cache_usage_percent']:.1f}%)\n"
-            f"📺 Каналы: {len(config.channel_ids)}\n"
-            f"🤖 Модель: {config.OLLAMA_MODEL}\n"
-            f"🔗 Ollama: {config.OLLAMA_BASE_URL}"
-        )
-
-        await callback_query.answer()
-        await callback_query.message.answer(system_info, parse_mode=ParseMode.MARKDOWN)
+        channels_info = []
+        if hasattr(config, 'channel_ids'):
+            for channel_id in config.channel_ids:
+                channels_info.append(f"📺 {channel_id}")
+        
+        if channels_info:
+            text = (
+                "📺 Отслеживаемые каналы:\n\n"
+                + "\n".join(channels_info[:10])  # Показываем первые 10
+                + (f"\n\n... и еще {len(channels_info) - 10}" if len(channels_info) > 10 else "")
+                + "\n\n💡 Настройка каналов доступна только администратору."
+            )
+        else:
+            text = "📺 Отслеживаемые каналы:\n\nСписок каналов пуст."
+        
+        await callback_query.message.answer(text)
+        
     except Exception as e:
-        logger.error(f"Ошибка при получении системной статистики: {e}")
-        await callback_query.answer(
-            "❌ Ошибка при получении статистики.", show_alert=True
+        logger.error(f"Ошибка получения списка каналов: {e}")
+        await callback_query.message.answer("❌ Ошибка получения списка каналов.")
+
+
+@dp.callback_query(F.data.startswith("hashtag_"))
+async def process_hashtag_click(callback_query: types.CallbackQuery):
+    """Обрабатывает клик по хештегу."""
+    await callback_query.answer()
+    
+    if not callback_query.message:
+        return
+    
+    hashtag = callback_query.data.replace("hashtag_", "")
+    
+    try:
+        data_manager = get_simple_data_manager()
+        if not data_manager:
+            await callback_query.message.answer("❌ Сервис временно недоступен.")
+            return
+        
+        # Ищем новости с данным хештегом (исправленный запрос для JSONB)
+        news_with_hashtag = data_manager._execute(
+            """
+            SELECT a.summary, a.sentiment, m.channel_title, m.channel_username, m.message_id
+            FROM analyses a
+            JOIN messages m ON a.message_id = m.message_id
+            WHERE a.hashtags::jsonb ? %s
+            ORDER BY m.date DESC
+            LIMIT 5
+            """,
+            (hashtag,)
+        )
+        
+        if not news_with_hashtag:
+            await callback_query.message.answer(f"📰 Новости с хештегом #{hashtag} не найдены.")
+            return
+        
+        response_text = f"🏷️ Новости с хештегом #{hashtag}:\n\n"
+        
+        for i, news in enumerate(news_with_hashtag, 1):
+            emoji = {"Позитивная": "😊", "Негативная": "😔", "Нейтральная": "😐"}.get(
+                news.get("sentiment", ""), "📰"
+            )
+            
+            response_text += f"{i}. {emoji} {news.get('summary', 'Нет описания')[:100]}...\n"
+            response_text += f"   📺 {news.get('channel_title', 'Неизвестный канал')}\n\n"
+        
+        await callback_query.message.answer(response_text)
+        
+    except Exception as e:
+        logger.error(f"Ошибка поиска по хештегу {hashtag}: {e}")
+        await callback_query.message.answer(f"❌ Ошибка поиска по хештегу #{hashtag}.")
+
+
+@dp.callback_query(F.data.startswith("news_"))
+async def process_news_click(callback_query: types.CallbackQuery):
+    """Обрабатывает клик по новости в дайджесте."""
+    await callback_query.answer()
+    
+    if not callback_query.message:
+        return
+    
+    try:
+        news_index = int(callback_query.data.replace("news_", ""))
+        
+        # Получаем дайджест заново
+        data_manager = get_simple_data_manager()
+        if not data_manager:
+            await callback_query.message.answer("❌ Сервис временно недоступен.")
+            return
+        
+        digest = data_manager.get_daily_digest()
+        if not digest or not digest.get("news") or news_index >= len(digest["news"]):
+            await callback_query.message.answer("❌ Новость не найдена.")
+            return
+        
+        news = digest["news"][news_index]
+        emoji = {"Позитивная": "😊", "Негативная": "😔", "Нейтральная": "😐"}.get(
+            news.get("sentiment", ""), "📰"
+        )
+        
+        # Формируем подробное сообщение
+        news_text = f"{emoji} Новость #{news_index + 1}\n\n"
+        news_text += f"📝 Содержание:\n{news.get('summary', 'Нет описания')}\n\n"
+        news_text += f"🎭 Тональность: {news.get('sentiment', 'Неизвестно')}\n"
+        news_text += f"📺 Канал: {news.get('channel', 'Неизвестно')}\n"
+        
+        # Добавляем хештеги если есть
+        if news.get("hashtags"):
+            hashtags = news["hashtags"] if isinstance(news["hashtags"], list) else []
+            if hashtags:
+                hashtags_str = " ".join([f"#{tag}" for tag in hashtags[:5]])
+                news_text += f"🏷️ Теги: {hashtags_str}\n"
+        
+        # Добавляем ссылку на оригинал если есть
+        if news.get("message_link"):
+            news_text += f"\n🔗 Читать полностью: {news['message_link']}"
+        elif news.get("channel_username"):
+            news_text += f"\n📱 Канал: @{news['channel_username']}"
+        
+        await callback_query.message.answer(news_text, disable_web_page_preview=True)
+        
+    except (ValueError, IndexError) as e:
+        logger.error(f"Ошибка обработки клика по новости: {e}")
+        await callback_query.message.answer("❌ Ошибка при открытии новости.")
+    except Exception as e:
+        logger.error(f"Неожиданная ошибка при обработке новости: {e}")
+        await callback_query.message.answer("❌ Произошла ошибка.")
+
+
+@dp.callback_query(F.data == "system_stats")
+async def process_callback_system_stats(callback_query: types.CallbackQuery):
+    """Показывает статистику системы."""
+    await callback_query.answer()
+
+    if not callback_query.message:
+        return
+
+    try:
+        # Получаем статистику кэша более безопасно
+        try:
+            cache_stats = llm_analyzer.get_cache_stats()
+            cache_info = f"💾 Кэш: {cache_stats.get('cache_size', 0)} записей"
+        except Exception:
+            cache_info = "💾 Кэш: недоступен"
+
+        # Получаем количество подписчиков
+        try:
+            data_manager = get_simple_data_manager()
+            subscribers_count = len(data_manager.get_all_subscribers()) if data_manager else 0
+        except Exception:
+            subscribers_count = 0
+
+        # Получаем количество каналов
+        try:
+            channels_count = len(config.channel_ids) if hasattr(config, 'channel_ids') else 0
+        except Exception:
+            channels_count = 0
+
+        # Получаем модель
+        try:
+            model_name = config.OLLAMA_MODEL if hasattr(config, 'OLLAMA_MODEL') else "неизвестно"
+        except Exception:
+            model_name = "неизвестно"
+
+        # Получаем интервал
+        try:
+            interval = config.CHECK_INTERVAL_SECONDS if hasattr(config, 'CHECK_INTERVAL_SECONDS') else 60
+        except Exception:
+            interval = 60
+
+        stats_text = (
+            "📊 Статистика системы:\n\n"
+            f"🤖 Бот: Онлайн\n"
+            f"📺 Каналы: {channels_count}\n"
+            f"🧠 LLM модель: {str(model_name)}\n"
+            f"👥 Подписчики: {subscribers_count}\n"
+            f"{cache_info}\n"
+            f"⏱ Интервал: {interval} сек"
         )
 
+        await callback_query.message.answer(stats_text)
+    except Exception as e:
+        logger.error(f"Ошибка получения статистики системы: {e}")
+        await callback_query.message.answer("❌ Ошибка получения статистики системы.")
 
+
+# Команды
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
+    """Показывает справку."""
     help_text = (
-        "🆘 **Справка по командам:**\n\n"
+        "🤖 **Справка по командам:**\n\n"
         "**Основные команды:**\n"
-        "`/start` - Начать работу с ботом\n"
-        "`/help` - Показать эту справку\n"
-        "`/stats` - Статистика анализа новостей\n"
-        "`/subscribe` - Управление подпиской\n"
-        "**Работа с ИИ:**\n"
-        "`/chat <текст>` - Пообщаться с ИИ-ассистентом\n"
-        "`/analyze <текст>` - Проанализировать текст\n"
+        "`/start` - Начать работу\n"
+        "`/help` - Эта справка\n"
+        "`/stats` - Статистика новостей\n"
+        "`/trends` - Трендовые темы\n"
+        "`/digest` - Дайджест за день\n\n"
+        "**Взаимодействие с ИИ:**\n"
+        "`/chat <текст>` - Общение с ИИ\n"
+        "`/analyze <текст>` - Анализ текста\n"
         "`/web <запрос>` - Поиск в интернете\n\n"
-        "**Системные команды:**\n"
+        "**Управление:**\n"
+        "`/subscribe` - Управление подпиской\n"
         "`/status` - Статус системы\n\n"
-        "💡 **Совет:** Используйте кнопки ниже для быстрого доступа к функциям!"
+        "💡 **Совет:** Используйте кнопки для удобной навигации!"
     )
     await message.answer(help_text, parse_mode=ParseMode.MARKDOWN)
 
 
 @dp.message(Command("subscribe"))
 async def cmd_subscribe(message: types.Message):
+    """Управление подпиской."""
     if not message.chat:
-        logger.warning("Получена команда /subscribe без информации о чате.")
         return
+
     await message.answer(
         "🔔 **Настройка подписки:**\n\nВыберите действие:",
         parse_mode=ParseMode.MARKDOWN,
@@ -287,10 +650,20 @@ async def cmd_subscribe(message: types.Message):
     )
 
 
+@dp.message(Command("settings"))
+async def cmd_settings(message: types.Message):
+    """Показывает настройки."""
+    await message.answer(
+        "⚙️ **Настройки системы:**\n\nВыберите действие:",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=get_settings_keyboard(),
+    )
+
+
 @dp.message(Command("status"))
 async def cmd_status(message: types.Message):
+    """Показывает статус системы."""
     try:
-        # Получаем статистику системы
         cache_stats = llm_analyzer.get_cache_stats()
         data_manager = get_simple_data_manager()
         subscribers_count = (
@@ -314,13 +687,19 @@ async def cmd_status(message: types.Message):
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
+    """Показывает статистику новостей."""
     await send_typing_action(message)
     try:
         data_manager = get_simple_data_manager()
-        stats = data_manager.get_statistics() if data_manager else None
+        if not data_manager:
+            await message.answer("❌ Сервис статистики временно недоступен.")
+            return
+
+        stats = data_manager.get_detailed_statistics()
+
         if not stats or stats.get("total_messages", 0) == 0:
             await message.answer(
-                "😔 **Пока нет данных для статистики.**\n\n"
+                "� **Пока нет данных для статистики.**\n\n"
                 "Подождите, пока система обработает первые новости из отслеживаемых каналов.",
                 parse_mode=ParseMode.MARKDOWN,
             )
@@ -335,14 +714,16 @@ async def cmd_stats(message: types.Message):
 
 @dp.message(Command("chat"))
 async def cmd_chat(message: types.Message, command: CommandObject):
+    """Чат с ИИ."""
     if not command.args:
         await message.answer(
-            "💬 **Чат с ИИ-ассистентом**\n\n"
+            "� **Чат с ИИ-ассистентом**\n\n"
             "Использование: `/chat <ваш вопрос>`\n\n"
             "Пример: `/chat Расскажи о погоде`",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
+
     text = command.args
     await send_typing_action(message)
 
@@ -355,6 +736,7 @@ async def cmd_chat(message: types.Message, command: CommandObject):
 
 @dp.message(Command("analyze"))
 async def cmd_analyze(message: types.Message, command: CommandObject):
+    """Анализ текста."""
     if not command.args:
         await message.answer(
             "🔍 **Анализ текста**\n\n"
@@ -363,6 +745,7 @@ async def cmd_analyze(message: types.Message, command: CommandObject):
             parse_mode=ParseMode.MARKDOWN,
         )
         return
+
     text_to_analyze = command.args
     await send_typing_action(message)
     progress = await message.answer("🔍 Анализирую текст...")
@@ -373,7 +756,6 @@ async def cmd_analyze(message: types.Message, command: CommandObject):
             f"`{'`, `'.join(analysis.hashtags)}`" if analysis.hashtags else "нет"
         )
 
-        # Эмодзи для тональности
         sentiment_emoji = {
             "Позитивная": "😊",
             "Негативная": "😔",
@@ -381,7 +763,7 @@ async def cmd_analyze(message: types.Message, command: CommandObject):
         }.get(analysis.sentiment, "🤔")
 
         response = (
-            f"📊 **Результаты анализа:**\n\n"
+            f"� **Результаты анализа:**\n\n"
             f"📝 **Содержание:**\n{analysis.summary}\n\n"
             f"🎭 **Тональность:** {sentiment_emoji} {analysis.sentiment}\n\n"
             f"🏷️ **Теги:**\n{hashtags_str}"
@@ -395,6 +777,7 @@ async def cmd_analyze(message: types.Message, command: CommandObject):
 
 @dp.message(Command("web"))
 async def cmd_web(message: types.Message, command: CommandObject):
+    """Поиск в интернете."""
     if not command.args:
         await message.answer(
             "🔍 **Поиск в интернете**\n\n"
@@ -403,6 +786,7 @@ async def cmd_web(message: types.Message, command: CommandObject):
             parse_mode=ParseMode.MARKDOWN,
         )
         return
+
     query = command.args
     await send_typing_action(message)
     progress = await message.answer(f'🔍 Ищу информацию по запросу: "{query}"...')
@@ -414,6 +798,7 @@ async def cmd_web(message: types.Message, command: CommandObject):
     if not search_results:
         await progress.edit_text(f"🤷‍♂️ По запросу «{query}» ничего не найдено.")
         return
+
     formatted = tavily_search.format_search_results(search_results, query)
 
     try:
@@ -421,28 +806,11 @@ async def cmd_web(message: types.Message, command: CommandObject):
             formatted, parse_mode=ParseMode.MARKDOWN_V2, disable_web_page_preview=True
         )
     except Exception as e:
-        # Fallback: отправляем без форматирования, если есть проблемы с Markdown
         logger.warning(f"Ошибка парсинга Markdown в /web: {e}")
-        # Создаем простую версию без форматирования
         simple_formatted = tavily_search.format_search_results_simple(
             search_results, query
         )
         await progress.edit_text(simple_formatted, disable_web_page_preview=True)
-
-
-@dp.message(F.chat.type == "private")
-async def handle_non_command(message: types.Message):
-    """Обрабатывает обычные сообщения как чат с ИИ."""
-    if message.text and not message.text.startswith("/"):
-        await send_typing_action(message)
-
-        # Показываем индикатор обработки
-        progress_msg = await message.answer("🤔 Обрабатываю ваш запрос...")
-
-        response = await llm_analyzer.get_chat_response(message.text)
-        formatted_response = f"💬 {response}"
-
-        await progress_msg.edit_text(formatted_response)
 
 
 @dp.message(Command("trends"))
@@ -452,27 +820,39 @@ async def cmd_trends(message: types.Message):
     progress = await message.answer("📈 Анализирую тренды...")
 
     try:
-        # Простой анализ трендов на основе статистики
         data_manager = get_simple_data_manager()
-        stats = data_manager.get_extended_statistics() if data_manager else {}
+        if not data_manager:
+            await progress.edit_text("❌ Сервис трендов временно недоступен.")
+            return
 
-        if not stats.get("popular_hashtags"):
+        stats = data_manager.get_trends_statistics()
+
+        if not stats or not stats.get("popular_hashtags"):
             await progress.edit_text("📊 Недостаточно данных для анализа трендов.")
             return
 
-        # Формируем отчет по трендам
         trends_text = "📈 **Трендовые темы за последние дни:**\n\n"
 
+        # Показываем хештеги без обратных кавычек
         for i, hashtag in enumerate(stats["popular_hashtags"][:5], 1):
-            trends_text += f"{i}. `#{hashtag}`\n"
+            trends_text += f"{i}. #{hashtag}\n"
 
-        # Добавляем информацию о топ-каналах
         if stats.get("top_channels"):
             trends_text += "\n📺 **Самые активные каналы:**\n"
             for channel in stats["top_channels"][:3]:
-                trends_text += f"• {channel['channel_title']} ({channel['message_count']} сообщений)\n"
+                trends_text += f"• {channel.get('title', 'Неизвестный')} ({channel.get('count', 0)} сообщений)\n"
+
+        trends_text += "\n👇 **Кликните на хештег для поиска новостей:**"
 
         await progress.edit_text(trends_text, parse_mode=ParseMode.MARKDOWN)
+
+        # Отправляем кликабельные хештеги отдельно
+        hashtag_keyboard = get_hashtag_keyboard(stats["popular_hashtags"][:6])
+        await message.answer(
+            "🏷️ **Кликабельные хештеги:**",
+            reply_markup=hashtag_keyboard.as_markup(),
+            parse_mode=ParseMode.MARKDOWN
+        )
 
     except Exception as e:
         logger.error(f"Ошибка при получении трендов: {e}")
@@ -481,414 +861,196 @@ async def cmd_trends(message: types.Message):
 
 @dp.message(Command("digest"))
 async def cmd_digest(message: types.Message):
-    """Генерирует дайджест новостей за день."""
+    """Генерирует компактный дайджест новостей за день."""
     await send_typing_action(message)
     progress = await message.answer("📰 Готовлю дайджест новостей...")
 
     try:
-        from datetime import date
+        data_manager = get_simple_data_manager()
+        if not data_manager:
+            await progress.edit_text("❌ Сервис дайджеста временно недоступен.")
+            return
 
-        today = date.today().isoformat()
+        digest = data_manager.get_daily_digest()
 
-        # PostgresManager использует пул `psycopg_pool`, поэтому берем соединение
-        with data_manager.pool.connection() as conn:  # type: ignore[attr-defined]
-            cur = conn.execute(
-                """
-                SELECT a.summary, a.sentiment, a.hashtags, m.channel_title
-                FROM analyses a
-                JOIN messages m ON a.message_id = m.message_id
-                WHERE DATE(m.date) = %s
-                ORDER BY m.date DESC
-                LIMIT 10
-            """,
-                (today,),
-            )
-
-            news_today = cur.fetchall()
-
-        if not news_today:
+        if not digest or not digest.get("news"):
             await progress.edit_text("📅 Сегодня новостей пока нет.")
             return
 
-        # Группируем по тональности
-        positive_news = []
-        negative_news = []
-        neutral_news = []
+        # Формируем компактный дайджест
+        digest_text = f"📰 **Дайджест новостей на {digest.get('date', 'сегодня')}**\n\n"
+        
+        # Статистика
+        positive_count = sum(1 for news in digest["news"] if news.get("sentiment") == "Позитивная")
+        negative_count = sum(1 for news in digest["news"] if news.get("sentiment") == "Негативная")
+        neutral_count = len(digest["news"]) - positive_count - negative_count
 
-        for news in news_today:
-            if news["sentiment"] == "Позитивная":
-                positive_news.append(news)
-            elif news["sentiment"] == "Негативная":
-                negative_news.append(news)
-            else:
-                neutral_news.append(news)
+        digest_text += f"📊 **Всего новостей:** {len(digest['news'])}\n"
+        digest_text += f"😊 Позитивных: {positive_count} | 😔 Негативных: {negative_count} | 😐 Нейтральных: {neutral_count}\n\n"
 
-        # Формируем дайджест
-        digest_text = f"📰 **Дайджест новостей на {today}**\n\n"
-        digest_text += f"📊 **Всего новостей:** {len(news_today)}\n\n"
+        # Топ новости (краткий список)
+        digest_text += "🔥 **Главные новости:**\n\n"
+        
+        for i, news in enumerate(digest["news"][:8], 1):  # Показываем топ-8
+            emoji = {"Позитивная": "😊", "Негативная": "😔", "Нейтральная": "😐"}.get(
+                news.get("sentiment", ""), "📰"
+            )
+            
+            # Краткое описание (первые 80 символов)
+            summary = news.get('summary', 'Нет описания')
+            short_summary = summary[:80] + "..." if len(summary) > 80 else summary
+            
+            digest_text += f"{i}. {emoji} {short_summary}\n"
+            digest_text += f"   📺 {news.get('channel', 'Неизвестно')[:25]}\n\n"
 
-        if positive_news:
-            digest_text += f"😊 **Позитивные ({len(positive_news)}):**\n"
-            for news in positive_news[:3]:
-                summary = (
-                    news["summary"][:80] + "..."
-                    if len(news["summary"]) > 80
-                    else news["summary"]
-                )
-                digest_text += f"• {summary}\n"
-            digest_text += "\n"
+        # Добавляем популярные темы
+        all_hashtags = []
+        for news in digest["news"]:
+            if news.get("hashtags"):
+                hashtags = news["hashtags"] if isinstance(news["hashtags"], list) else []
+                all_hashtags.extend(hashtags)
+        
+        if all_hashtags:
+            # Подсчитываем популярность хештегов
+            hashtag_counts = {}
+            for tag in all_hashtags:
+                hashtag_counts[tag] = hashtag_counts.get(tag, 0) + 1
+            
+            # Топ-5 хештегов
+            top_hashtags = sorted(hashtag_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+            if top_hashtags:
+                digest_text += "🏷️ **Популярные темы:** "
+                digest_text += " ".join([f"#{tag}" for tag, _ in top_hashtags])
+                digest_text += "\n\n"
 
-        if negative_news:
-            digest_text += f"😔 **Негативные ({len(negative_news)}):**\n"
-            for news in negative_news[:3]:
-                summary = (
-                    news["summary"][:80] + "..."
-                    if len(news["summary"]) > 80
-                    else news["summary"]
-                )
-                digest_text += f"• {summary}\n"
-            digest_text += "\n"
+        digest_text += "👇 **Выберите новость для подробного просмотра:**"
 
-        if neutral_news:
-            digest_text += f"😐 **Нейтральные ({len(neutral_news)}):**\n"
-            for news in neutral_news[:2]:
-                summary = (
-                    news["summary"][:80] + "..."
-                    if len(news["summary"]) > 80
-                    else news["summary"]
-                )
-                digest_text += f"• {summary}\n"
-
-        await progress.edit_text(digest_text, parse_mode=ParseMode.MARKDOWN)
+        # Создаем клавиатуру с новостями
+        keyboard = get_digest_keyboard(digest["news"][:8])
+        
+        await progress.edit_text(
+            digest_text, 
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=keyboard.as_markup()
+        )
 
     except Exception as e:
         logger.error(f"Ошибка при создании дайджеста: {e}")
         await progress.edit_text("❌ Ошибка при создании дайджеста.")
 
 
-@dp.message(Command("health"))
-async def cmd_health(message: types.Message):
-    """Показывает состояние здоровья системы."""
-    await send_typing_action(message)
-    progress = await message.answer("🏥 Проверяю состояние системы...")
+@dp.message(F.chat.type == "private")
+async def handle_non_command(message: types.Message):
+    """Обрабатывает обычные сообщения как чат с ИИ."""
+    if (
+        message.text
+        and not message.text.startswith("/")
+        and not message.text
+        in [
+            "📊 Статистика",
+            "🔔 Подписка",
+            "⚙️ Настройки",
+            "📈 Тренды",
+            "💬 Чат с ИИ",
+            "🔍 Поиск",
+            "📰 Дайджест",
+            "ℹ️ Помощь",
+        ]
+    ):
+        await send_typing_action(message)
+        progress_msg = await message.answer("🤔 Обрабатываю ваш запрос...")
 
-    try:
-        from services.simple_health_check import simple_health_check
+        response = await llm_analyzer.get_chat_response(message.text)
+        formatted_response = f"💬 {response}"
 
-        stats = simple_health_check.get_basic_stats()
-
-        # Формируем простой отчет
-        health_report = {
-            "status": "healthy" if stats["database_ok"] else "warning",
-            "current_metrics": {
-                "uptime_hours": stats["uptime_hours"],
-                "database_status": "healthy" if stats["database_ok"] else "unhealthy",
-                "active_subscribers": stats["subscribers_count"],
-            },
-        }
-
-        status_emoji = {
-            "healthy": "✅",
-            "warning": "⚠️",
-            "critical": "🔴",
-            "error": "❌",
-        }.get(health_report.get("status", "unknown"), "❓")
-
-        health_text = f"{status_emoji} **Состояние системы: {health_report.get('status', 'неизвестно').upper()}**\n\n"
-
-        if health_report.get("current_metrics"):
-            metrics = health_report["current_metrics"]
-            health_text += "📊 **Текущие метрики:**\n"
-            health_text += f"🖥 CPU: {metrics.get('cpu_usage', 0):.1f}%\n"
-            health_text += f"💾 Память: {metrics.get('memory_usage', 0):.1f}%\n"
-            health_text += f"💿 Диск: {metrics.get('disk_usage', 0):.1f}%\n"
-            health_text += f"🧠 Кэш LLM: {metrics.get('cache_usage', 0):.1f}%\n"
-            health_text += f"👥 Подписчики: {metrics.get('active_subscribers', 0)}\n"
-            health_text += f"🤖 Ollama: {metrics.get('ollama_status', 'неизвестно')}\n"
-            health_text += f"🗄 БД: {metrics.get('database_status', 'неизвестно')}\n\n"
-
-        if health_report.get("uptime_hours"):
-            hours = health_report["uptime_hours"]
-            health_text += f"⏱ **Время работы:** {hours:.1f} ч\n\n"
-
-        if health_report.get("warnings"):
-            health_text += "⚠️ **Предупреждения:**\n"
-            for warning in health_report["warnings"]:
-                health_text += f"• {warning}\n"
-            health_text += "\n"
-
-        if health_report.get("issues"):
-            health_text += "🔴 **Проблемы:**\n"
-            for issue in health_report["issues"]:
-                health_text += f"• {issue}\n"
-
-        await progress.edit_text(health_text, parse_mode=ParseMode.MARKDOWN)
-
-    except Exception as e:
-        logger.error(f"Ошибка при получении состояния здоровья: {e}")
-        await progress.edit_text("❌ Ошибка при проверке состояния системы.")
+        await progress_msg.edit_text(formatted_response)
 
 
-@dp.message(Command("quick"))
-async def cmd_quick(message: types.Message, command: CommandObject):
-    """Быстрые команды: /quick stats, /quick clear, /quick health."""
-    if not command.args:
-        help_text = (
-            "⚡ **Быстрые команды:**\n\n"
-            "`/quick stats` - Быстрая статистика\n"
-            "`/quick health` - Состояние системы\n"
-            "`/quick clear` - Очистить кэш\n"
-            "`/quick trends` - Трендовые темы\n"
-            "`/quick digest` - Дайджест за сегодня"
-        )
-        await message.answer(help_text, parse_mode=ParseMode.MARKDOWN)
-        return
-
-    action = command.args.lower()
-
-    if action == "stats":
-        await cmd_stats(message)
-    elif action == "health":
-        await cmd_health(message)
-    elif action == "clear":
-        try:
-            cache_stats = llm_analyzer.get_cache_stats()
-            llm_analyzer.clear_cache()
-            await message.answer(
-                f"✅ Кэш очищен! Освобождено {cache_stats['cache_size']} записей."
-            )
-        except Exception as e:
-            await message.answer("❌ Ошибка при очистке кэша.")
-    elif action == "trends":
-        await cmd_trends(message)
-    elif action == "digest":
-        await cmd_digest(message)
-    else:
-        await message.answer(
-            "❓ Неизвестная быстрая команда. Используйте `/quick` для справки."
-        )
-
-
-# Обработчики кнопок удалены, так как остается только кнопка "Подписка"
-
-
-@dp.message(Command("notifications"))
-async def cmd_notifications(message: types.Message, command: CommandObject):
-    """Управление настройками уведомлений."""
-    if not message.chat:
-        return
-
-    chat_id = message.chat.id
-
-    if not command.args:
-        # Проверяем подписку
-        is_subscribed = data_manager.is_subscriber(chat_id)
-
-        if not is_subscribed:
-            help_text = (
-                "🔔 **Настройки уведомлений:**\n\n"
-                "❌ **Вы не подписаны на уведомления!**\n\n"
-                "Чтобы получать уведомления, сначала подпишитесь:\n"
-                "• Нажмите кнопку 🔔 **Подписка** ниже\n"
-                "• Или используйте команду `/subscribe`\n\n"
-                "После подписки вы сможете настроить фильтры уведомлений."
-            )
-            await message.answer(help_text, parse_mode=ParseMode.MARKDOWN)
-            return
-
-        # Показываем текущие настройки для подписчиков
-        settings = data_manager.get_user_settings(chat_id)
-
-        notifications_status = (
-            "🔔 Включены"
-            if settings.get("notification_enabled", True)
-            else "🔕 Отключены"
-        )
-
-        sentiment_names = {
-            "all": "Все новости",
-            "positive": "Только позитивные",
-            "negative": "Только негативные",
-            "neutral": "Только нейтральные",
-        }
-        sentiment_filter = sentiment_names.get(
-            settings.get("sentiment_filter", "all"), "Все новости"
-        )
-
-        help_text = (
-            f"🔔 **Настройки уведомлений:**\n\n"
-            f"✅ **Вы подписаны на уведомления**\n\n"
-            f"**Текущие настройки:**\n"
-            f"• Уведомления: {notifications_status}\n"
-            f"• Фильтр тональности: {sentiment_filter}\n\n"
-            f"**Команды для изменения:**\n"
-            f"`/notifications on` - Включить уведомления\n"
-            f"`/notifications off` - Отключить уведомления\n"
-            f"`/notifications all` - Все новости\n"
-            f"`/notifications positive` - Только позитивные\n"
-            f"`/notifications negative` - Только негативные\n"
-            f"`/notifications neutral` - Только нейтральные\n\n"
-            f"**Пример:** `/notifications positive`"
-        )
-
-        await message.answer(help_text, parse_mode=ParseMode.MARKDOWN)
-        return
-
-    args = command.args.lower()
-
-    # Обработка команд
-    if args == "on":
-        success = data_manager.update_user_settings(
-            chat_id, {"notification_enabled": True}
-        )
-        if success:
-            await message.answer(
-                "🔔 **Уведомления включены!**", parse_mode=ParseMode.MARKDOWN
-            )
-        else:
-            await message.answer("❌ Ошибка при сохранении настроек")
-
-    elif args == "off":
-        success = data_manager.update_user_settings(
-            chat_id, {"notification_enabled": False}
-        )
-        if success:
-            await message.answer(
-                "🔕 **Уведомления отключены!**", parse_mode=ParseMode.MARKDOWN
-            )
-        else:
-            await message.answer("❌ Ошибка при сохранении настроек")
-
-    elif args in ["all", "positive", "negative", "neutral"]:
-        success = data_manager.update_user_settings(chat_id, {"sentiment_filter": args})
-        if success:
-            filter_names = {
-                "all": "все новости",
-                "positive": "только позитивные новости",
-                "negative": "только негативные новости",
-                "neutral": "только нейтральные новости",
-            }
-            await message.answer(
-                f"🎯 **Фильтр установлен:** {filter_names[args]}",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-        else:
-            await message.answer("❌ Ошибка при сохранении настроек")
-    else:
-        await message.answer(
-            "❓ **Неизвестная команда.**\n\n"
-            "Используйте `/notifications` для справки.",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-
-
-# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ УСТРАНЕНИЯ ДУБЛИРОВАНИЯ ===
-
-
+# Вспомогательные функции
 async def send_typing_action(message: types.Message):
-    """Отправляет индикатор печати, если доступен бот."""
-    if message.bot:
-        await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    """Отправляет действие 'печатает'."""
+    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
 
 
 async def handle_command_error(message: types.Message, error: Exception, context: str):
-    """Централизованная обработка ошибок команд."""
-    global_error_handler.handle_error(error, context, ErrorCategory.TELEGRAM_API)
-    await message.answer(f"❌ Ошибка при {context}.")
+    """Обрабатывает ошибки команд."""
+    logger.error(f"Ошибка при {context}: {error}")
+    await message.answer(f"❌ Произошла ошибка при {context}. Попробуйте позже.")
 
 
 def format_statistics_message(stats: Dict[str, Any]) -> str:
     """Форматирует сообщение со статистикой."""
-    sentiment_counts = stats.get("sentiment_counts", {})
-    hashtags = stats.get("popular_hashtags", [])
+    total_messages = stats.get("total_messages", 0)
+    total_analyses = stats.get("total_analyses", 0)
 
-    total = stats.get("total_messages", 0)
-    positive = sentiment_counts.get("Позитивная", 0)
-    negative = sentiment_counts.get("Негативная", 0)
-    neutral = sentiment_counts.get("Нейтральная", 0)
+    sentiment_stats = stats.get("sentiment_distribution", {})
+    positive = sentiment_stats.get("Позитивная", 0)
+    negative = sentiment_stats.get("Негативная", 0)
+    neutral = sentiment_stats.get("Нейтральная", 0)
 
-    # Вычисляем проценты
-    pos_pct = (positive / total * 100) if total > 0 else 0
-    neg_pct = (negative / total * 100) if total > 0 else 0
-    neu_pct = (neutral / total * 100) if total > 0 else 0
+    top_hashtags = stats.get("popular_hashtags", [])[:5]
+    top_channels = stats.get("top_channels", [])[:3]
 
-    # Используем константу для ограничения количества хештегов
-    display_hashtags = hashtags[: settings.MAX_POPULAR_HASHTAGS_DISPLAY]
-    hashtags_str = (
-        f"`{'`, `'.join(display_hashtags)}`" if display_hashtags else "нет данных"
+    message_text = (
+        f"📊 **Статистика новостей:**\n\n"
+        f"📰 **Всего сообщений:** {total_messages}\n"
+        f"🔍 **Проанализировано:** {total_analyses}\n\n"
+        f"🎭 **Распределение по тональности:**\n"
+        f"😊 Позитивные: {positive}\n"
+        f"😔 Негативные: {negative}\n"
+        f"😐 Нейтральные: {neutral}\n\n"
     )
 
-    return (
-        f"📊 **Статистика анализа новостей:**\n\n"
-        f"📝 **Всего обработано:** {total}\n\n"
-        f"🎯 **Анализ тональности:**\n"
-        f"📈 Позитивных: {positive} ({pos_pct:.1f}%)\n"
-        f"📉 Негативных: {negative} ({neg_pct:.1f}%)\n"
-        f"➖ Нейтральных: {neutral} ({neu_pct:.1f}%)\n\n"
-        f"🏷️ **Популярные теги:**\n"
-        f"{hashtags_str}"
-    )
+    if top_hashtags:
+        message_text += "🏷️ **Популярные темы:**\n"
+        for i, tag in enumerate(top_hashtags, 1):
+            message_text += f"{i}. #{tag}\n"
+        message_text += "\n"
+
+    if top_channels:
+        message_text += "📺 **Активные каналы:**\n"
+        for channel in top_channels:
+            title = channel.get("title", "Неизвестный")[:30]
+            count = channel.get("count", 0)
+            message_text += f"• {title}: {count} сообщений\n"
+
+    return message_text
 
 
-# ---------------------------------------------------------------------------
-#  Обработчик входящих сообщений из каналов (Bot API),
-#  заменяет Telethon-мониторинг.
-# ---------------------------------------------------------------------------
+def get_hashtag_keyboard(hashtags: List[str]) -> InlineKeyboardBuilder:
+    """Создает клавиатуру с кликабельными хештегами."""
+    builder = InlineKeyboardBuilder()
+    for hashtag in hashtags[:6]:  # Максимум 6 хештегов
+        builder.button(
+            text=f"#{hashtag}",
+            callback_data=f"hashtag_{hashtag}"
+        )
+    builder.adjust(2)  # По 2 кнопки в ряд
+    return builder
+
+
+def get_digest_keyboard(news_list: List[Dict[str, Any]]) -> InlineKeyboardBuilder:
+    """Создает клавиатуру для дайджеста новостей."""
+    builder = InlineKeyboardBuilder()
+    
+    for i, news in enumerate(news_list, 1):
+        emoji = {"Позитивная": "😊", "Негативная": "😔", "Нейтральная": "😐"}.get(
+            news.get("sentiment", ""), "📰"
+        )
+        
+        # Создаем короткий текст для кнопки
+        button_text = f"{emoji} {i}"
+        
+        builder.button(
+            text=button_text,
+            callback_data=f"news_{i-1}"  # Индекс новости (0-based)
+        )
+    
+    builder.adjust(4)  # По 4 кнопки в ряд
+    return builder
 
 
 @dp.channel_post()
 async def handle_channel_post(message: types.Message):
-    """Обрабатывает новое сообщение в канале (Bot API)."""
-    if not message.text:
-        return  # пропускаем не-текстовые сообщения
-
-    channel_id = str(message.chat.id)
-    last_known_id = data_manager.get_last_message_id(channel_id)
-
-    # Пропускаем, если уже обработано (редкие дубликаты)
-    if message.message_id <= last_known_id:
-        return
-
-    # Сохраняем сырой текст и анализируем
-    raw_msg = {
-        "id": message.message_id,
-        "text": message.text,
-        "date": message.date.isoformat() if message.date else None,
-        "channel_id": channel_id,
-        "channel_title": message.chat.title or "Без названия",
-        "channel_username": message.chat.username,
-    }
-
-    try:
-        analysis = await llm_analyzer.analyze_message(message.text)
-        if analysis is None:
-            logger.warning(
-                "Не удалось проанализировать сообщение %s", message.message_id
-            )
-            return
-
-        # Persist
-        data_manager.save_message(raw_msg)
-        data_manager.save_analysis(message.message_id, analysis.dict())
-        data_manager.set_last_message_id(channel_id, message.message_id)
-
-        # Уведомляем подписчиков
-        message_link = (
-            f"https://t.me/{message.chat.username}/{message.message_id}"
-            if message.chat.username
-            else "N/A"
-        )
-
-        notify_data = {
-            "channel_title": raw_msg["channel_title"],
-            "message_link": message_link,
-            "summary": analysis.summary,
-            "sentiment": analysis.sentiment,
-            "hashtags_formatted": analysis.format_hashtags(),
-            "hashtags": analysis.hashtags,
-        }
-
-        await send_analysis_result(bot, notify_data)
-
-    except Exception as e:  # noqa: BLE001
-        logger.error("Ошибка обработки channel_post: %s", e, exc_info=True)
+    """Обрабатывает сообщения из каналов."""
+    pass  # Обработка происходит в monitoring_service.py
