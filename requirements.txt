@@ -14,17 +14,17 @@ tavily-python==0.3.3     # Web search API
 langchain==0.3.26        # LangChain core
 langchain-community==0.3.27  # LangChain community integrations
 ollama==0.3.3            # Python-клиент Ollama
-tiktoken==0.9.0          # Tokenizer
+tiktoken==0.9.0           # Tokenizer
 
 # Database
 psycopg[binary]==3.2.9   # PostgreSQL driver
 psycopg-pool==3.2.6      # Connection pooling
 asyncpg==0.30.0          # Async PostgreSQL driver
-psycopg2-binary==2.9.9   # Sync PostgreSQL driver
+psycopg2-binary==2.9.10  # Sync PostgreSQL driver (обновлено)
 
 # Configuration & Validation
-pydantic>=2.7.4          # Data validation (совместимо с aiogram)
-pydantic-settings>=2.2.1 # Settings management
+pydantic==2.7.4          # Data validation (совместимо с aiogram)
+pydantic-settings==2.10.1 # Settings management
 python-dotenv==1.0.1     # Environment variables
 
 # Templates & Utils
@@ -35,16 +35,16 @@ jinja2==3.1.3            # Template engine для промптов
 # ============================================================================
 
 # System monitoring
-psutil>=5.9.0
+psutil==5.9.8
 
 # ML & Evaluation
-transformers>=4.41.2
-sentencepiece>=0.2.0
-accelerate>=0.29.0
-nltk>=3.8.1
-torch>=2.1
-rouge-score>=0.1.2
-numpy>=1.24.0
+transformers==4.53.1
+sentencepiece==0.2.0
+accelerate==1.8.1
+nltk==3.8.1
+torch==2.5.0
+rouge-score==0.1.2
+numpy==1.26.4
 
 # Development tools
 ruff==0.4.4              # Linter & formatter
