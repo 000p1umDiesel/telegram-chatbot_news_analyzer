@@ -335,6 +335,9 @@ class SyncPostgresManager:
                     a.sentiment,
                     a.hashtags,
                     m.channel_title as channel,
+                    m.channel_id,
+                    m.channel_username,
+                    m.message_id,
                     m.date
                 FROM analyses a
                 JOIN messages m ON a.message_id = m.message_id
@@ -362,12 +365,27 @@ class SyncPostgresManager:
                     except (json.JSONDecodeError, TypeError):
                         hashtags = []
 
+                # Формируем ссылку на оригинальное сообщение
+                message_link = None
+                if row["channel_username"] and row["message_id"]:
+                    # Убираем @ если есть
+                    username = row["channel_username"].lstrip("@")
+                    message_link = f"https://t.me/{username}/{row['message_id']}"
+                elif row["channel_id"] and row["message_id"]:
+                    # Для приватных каналов используем ID
+                    channel_id_str = str(row["channel_id"]).lstrip("-100")
+                    message_link = (
+                        f"https://t.me/c/{channel_id_str}/{row['message_id']}"
+                    )
+
                 news_list.append(
                     {
                         "summary": row["summary"],
                         "sentiment": row["sentiment"],
                         "hashtags": hashtags,
                         "channel": row["channel"],
+                        "channel_username": row["channel_username"],
+                        "message_link": message_link,
                         "date": row["date"].isoformat() if row["date"] else None,
                     }
                 )

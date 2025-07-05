@@ -257,40 +257,38 @@ async def process_callback_clear_cache(callback_query: types.CallbackQuery):
 async def process_callback_notification_settings(callback_query: types.CallbackQuery):
     """Показывает настройки уведомлений."""
     await callback_query.answer()
-    
+
     if not callback_query.message:
         return
-    
+
     chat_id = callback_query.message.chat.id
     data_manager = get_simple_data_manager()
-    
+
     if not data_manager:
         await callback_query.message.answer("❌ Сервис временно недоступен.")
         return
-    
+
     settings = data_manager.get_user_settings(chat_id)
-    
+
     # Создаем клавиатуру для настроек уведомлений
     builder = InlineKeyboardBuilder()
-    current_enabled = settings.get('notification_enabled', True)
-    
+    current_enabled = settings.get("notification_enabled", True)
+
     builder.add(
         types.InlineKeyboardButton(
             text=f"🔔 Уведомления: {'✅ Вкл' if current_enabled else '❌ Выкл'}",
-            callback_data=f"toggle_notifications_{not current_enabled}"
+            callback_data=f"toggle_notifications_{not current_enabled}",
         )
     )
-    
+
     text = (
         "🔔 **Настройки уведомлений:**\n\n"
         f"Текущий статус: {'✅ Включены' if current_enabled else '❌ Выключены'}\n\n"
         "Нажмите кнопку для изменения:"
     )
-    
+
     await callback_query.message.answer(
-        text, 
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=builder.as_markup()
+        text, parse_mode=ParseMode.MARKDOWN, reply_markup=builder.as_markup()
     )
 
 
@@ -298,30 +296,29 @@ async def process_callback_notification_settings(callback_query: types.CallbackQ
 async def process_toggle_notifications(callback_query: types.CallbackQuery):
     """Переключает уведомления."""
     await callback_query.answer()
-    
+
     if not callback_query.message:
         return
-    
+
     chat_id = callback_query.message.chat.id
     data_manager = get_simple_data_manager()
-    
+
     if not data_manager:
         await callback_query.message.answer("❌ Сервис временно недоступен.")
         return
-    
+
     # Извлекаем новое значение из callback_data
     new_value = callback_query.data.split("_")[-1] == "True"
-    
+
     # Обновляем настройки
-    success = data_manager.update_user_settings(chat_id, {
-        'notification_enabled': new_value
-    })
-    
+    success = data_manager.update_user_settings(
+        chat_id, {"notification_enabled": new_value}
+    )
+
     if success:
         status_text = "включены" if new_value else "выключены"
         await callback_query.message.answer(
-            f"✅ Уведомления {status_text}!",
-            parse_mode=ParseMode.MARKDOWN
+            f"✅ Уведомления {status_text}!", parse_mode=ParseMode.MARKDOWN
         )
     else:
         await callback_query.message.answer("❌ Ошибка обновления настроек.")
@@ -331,52 +328,49 @@ async def process_toggle_notifications(callback_query: types.CallbackQuery):
 async def process_callback_sentiment_filter(callback_query: types.CallbackQuery):
     """Показывает фильтр тональности."""
     await callback_query.answer()
-    
+
     if not callback_query.message:
         return
-    
+
     chat_id = callback_query.message.chat.id
     data_manager = get_simple_data_manager()
-    
+
     if not data_manager:
         await callback_query.message.answer("❌ Сервис временно недоступен.")
         return
-    
+
     settings = data_manager.get_user_settings(chat_id)
-    current_filter = settings.get('sentiment_filter', 'all')
-    
+    current_filter = settings.get("sentiment_filter", "all")
+
     # Создаем клавиатуру для фильтра тональности
     builder = InlineKeyboardBuilder()
-    
+
     filters = [
-        ('all', 'Все новости'),
-        ('Позитивная', '😊 Позитивные'),
-        ('Негативная', '😔 Негативные'),
-        ('Нейтральная', '😐 Нейтральные')
+        ("all", "Все новости"),
+        ("Позитивная", "😊 Позитивные"),
+        ("Негативная", "😔 Негативные"),
+        ("Нейтральная", "😐 Нейтральные"),
     ]
-    
+
     for filter_value, filter_name in filters:
         is_current = filter_value == current_filter
         button_text = f"{'✅ ' if is_current else ''}{filter_name}"
         builder.add(
             types.InlineKeyboardButton(
-                text=button_text,
-                callback_data=f"set_sentiment_{filter_value}"
+                text=button_text, callback_data=f"set_sentiment_{filter_value}"
             )
         )
-    
+
     builder.adjust(1)
-    
+
     text = (
         "🎭 **Фильтр тональности:**\n\n"
         f"Текущий фильтр: {dict(filters)[current_filter]}\n\n"
         "Выберите тип новостей для получения:"
     )
-    
+
     await callback_query.message.answer(
-        text, 
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=builder.as_markup()
+        text, parse_mode=ParseMode.MARKDOWN, reply_markup=builder.as_markup()
     )
 
 
@@ -384,35 +378,35 @@ async def process_callback_sentiment_filter(callback_query: types.CallbackQuery)
 async def process_set_sentiment(callback_query: types.CallbackQuery):
     """Устанавливает фильтр тональности."""
     await callback_query.answer()
-    
+
     if not callback_query.message:
         return
-    
+
     chat_id = callback_query.message.chat.id
     data_manager = get_simple_data_manager()
-    
+
     if not data_manager:
         await callback_query.message.answer("❌ Сервис временно недоступен.")
         return
-    
+
     # Извлекаем значение фильтра
     sentiment_filter = callback_query.data.replace("set_sentiment_", "")
-    
+
     # Обновляем настройки
-    success = data_manager.update_user_settings(chat_id, {
-        'sentiment_filter': sentiment_filter
-    })
-    
+    success = data_manager.update_user_settings(
+        chat_id, {"sentiment_filter": sentiment_filter}
+    )
+
     if success:
         filter_names = {
-            'all': 'все новости',
-            'Позитивная': 'позитивные новости',
-            'Негативная': 'негативные новости',
-            'Нейтральная': 'нейтральные новости'
+            "all": "все новости",
+            "Позитивная": "позитивные новости",
+            "Негативная": "негативные новости",
+            "Нейтральная": "нейтральные новости",
         }
         await callback_query.message.answer(
             f"✅ Фильтр установлен: {filter_names.get(sentiment_filter, sentiment_filter)}!",
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.MARKDOWN,
         )
     else:
         await callback_query.message.answer("❌ Ошибка обновления настроек.")
@@ -422,29 +416,33 @@ async def process_set_sentiment(callback_query: types.CallbackQuery):
 async def process_callback_channel_filter(callback_query: types.CallbackQuery):
     """Показывает фильтр каналов."""
     await callback_query.answer()
-    
+
     if not callback_query.message:
         return
-    
+
     # Получаем список отслеживаемых каналов
     try:
         channels_info = []
-        if hasattr(config, 'channel_ids'):
+        if hasattr(config, "channel_ids"):
             for channel_id in config.channel_ids:
                 channels_info.append(f"📺 {channel_id}")
-        
+
         if channels_info:
             text = (
                 "📺 Отслеживаемые каналы:\n\n"
                 + "\n".join(channels_info[:10])  # Показываем первые 10
-                + (f"\n\n... и еще {len(channels_info) - 10}" if len(channels_info) > 10 else "")
+                + (
+                    f"\n\n... и еще {len(channels_info) - 10}"
+                    if len(channels_info) > 10
+                    else ""
+                )
                 + "\n\n💡 Настройка каналов доступна только администратору."
             )
         else:
             text = "📺 Отслеживаемые каналы:\n\nСписок каналов пуст."
-        
+
         await callback_query.message.answer(text)
-        
+
     except Exception as e:
         logger.error(f"Ошибка получения списка каналов: {e}")
         await callback_query.message.answer("❌ Ошибка получения списка каналов.")
@@ -454,18 +452,18 @@ async def process_callback_channel_filter(callback_query: types.CallbackQuery):
 async def process_hashtag_click(callback_query: types.CallbackQuery):
     """Обрабатывает клик по хештегу."""
     await callback_query.answer()
-    
+
     if not callback_query.message:
         return
-    
+
     hashtag = callback_query.data.replace("hashtag_", "")
-    
+
     try:
         data_manager = get_simple_data_manager()
         if not data_manager:
             await callback_query.message.answer("❌ Сервис временно недоступен.")
             return
-        
+
         # Ищем новости с данным хештегом (исправленный запрос для JSONB)
         news_with_hashtag = data_manager._execute(
             """
@@ -476,25 +474,31 @@ async def process_hashtag_click(callback_query: types.CallbackQuery):
             ORDER BY m.date DESC
             LIMIT 5
             """,
-            (hashtag,)
+            (hashtag,),
         )
-        
+
         if not news_with_hashtag:
-            await callback_query.message.answer(f"📰 Новости с хештегом #{hashtag} не найдены.")
+            await callback_query.message.answer(
+                f"📰 Новости с хештегом #{hashtag} не найдены."
+            )
             return
-        
+
         response_text = f"🏷️ Новости с хештегом #{hashtag}:\n\n"
-        
+
         for i, news in enumerate(news_with_hashtag, 1):
             emoji = {"Позитивная": "😊", "Негативная": "😔", "Нейтральная": "😐"}.get(
                 news.get("sentiment", ""), "📰"
             )
-            
-            response_text += f"{i}. {emoji} {news.get('summary', 'Нет описания')[:100]}...\n"
-            response_text += f"   📺 {news.get('channel_title', 'Неизвестный канал')}\n\n"
-        
+
+            response_text += (
+                f"{i}. {emoji} {news.get('summary', 'Нет описания')[:100]}...\n"
+            )
+            response_text += (
+                f"   📺 {news.get('channel_title', 'Неизвестный канал')}\n\n"
+            )
+
         await callback_query.message.answer(response_text)
-        
+
     except Exception as e:
         logger.error(f"Ошибка поиска по хештегу {hashtag}: {e}")
         await callback_query.message.answer(f"❌ Ошибка поиска по хештегу #{hashtag}.")
@@ -504,50 +508,58 @@ async def process_hashtag_click(callback_query: types.CallbackQuery):
 async def process_news_click(callback_query: types.CallbackQuery):
     """Обрабатывает клик по новости в дайджесте."""
     await callback_query.answer()
-    
+
     if not callback_query.message:
         return
-    
+
     try:
         news_index = int(callback_query.data.replace("news_", ""))
-        
+
         # Получаем дайджест заново
         data_manager = get_simple_data_manager()
         if not data_manager:
             await callback_query.message.answer("❌ Сервис временно недоступен.")
             return
-        
+
         digest = data_manager.get_daily_digest()
         if not digest or not digest.get("news") or news_index >= len(digest["news"]):
             await callback_query.message.answer("❌ Новость не найдена.")
             return
-        
+
         news = digest["news"][news_index]
         emoji = {"Позитивная": "😊", "Негативная": "😔", "Нейтральная": "😐"}.get(
             news.get("sentiment", ""), "📰"
         )
-        
+
         # Формируем подробное сообщение
         news_text = f"{emoji} Новость #{news_index + 1}\n\n"
         news_text += f"📝 Содержание:\n{news.get('summary', 'Нет описания')}\n\n"
         news_text += f"🎭 Тональность: {news.get('sentiment', 'Неизвестно')}\n"
         news_text += f"📺 Канал: {news.get('channel', 'Неизвестно')}\n"
-        
+
         # Добавляем хештеги если есть
         if news.get("hashtags"):
             hashtags = news["hashtags"] if isinstance(news["hashtags"], list) else []
             if hashtags:
                 hashtags_str = " ".join([f"#{tag}" for tag in hashtags[:5]])
                 news_text += f"🏷️ Теги: {hashtags_str}\n"
-        
-        # Добавляем ссылку на оригинал если есть
+
+        # Создаем клавиатуру с кнопкой для перехода к оригиналу
+        keyboard = InlineKeyboardBuilder()
+
         if news.get("message_link"):
-            news_text += f"\n🔗 Читать полностью: {news['message_link']}"
+            keyboard.button(text="📖 Читать полную новость", url=news["message_link"])
         elif news.get("channel_username"):
-            news_text += f"\n📱 Канал: @{news['channel_username']}"
-        
-        await callback_query.message.answer(news_text, disable_web_page_preview=True)
-        
+            # Если нет прямой ссылки, добавляем ссылку на канал
+            username = news["channel_username"].lstrip("@")
+            keyboard.button(
+                text=f"📱 Перейти в канал @{username}", url=f"https://t.me/{username}"
+            )
+
+        await callback_query.message.answer(
+            news_text, reply_markup=keyboard.as_markup(), disable_web_page_preview=True
+        )
+
     except (ValueError, IndexError) as e:
         logger.error(f"Ошибка обработки клика по новости: {e}")
         await callback_query.message.answer("❌ Ошибка при открытии новости.")
@@ -575,25 +587,35 @@ async def process_callback_system_stats(callback_query: types.CallbackQuery):
         # Получаем количество подписчиков
         try:
             data_manager = get_simple_data_manager()
-            subscribers_count = len(data_manager.get_all_subscribers()) if data_manager else 0
+            subscribers_count = (
+                len(data_manager.get_all_subscribers()) if data_manager else 0
+            )
         except Exception:
             subscribers_count = 0
 
         # Получаем количество каналов
         try:
-            channels_count = len(config.channel_ids) if hasattr(config, 'channel_ids') else 0
+            channels_count = (
+                len(config.channel_ids) if hasattr(config, "channel_ids") else 0
+            )
         except Exception:
             channels_count = 0
 
         # Получаем модель
         try:
-            model_name = config.OLLAMA_MODEL if hasattr(config, 'OLLAMA_MODEL') else "неизвестно"
+            model_name = (
+                config.OLLAMA_MODEL if hasattr(config, "OLLAMA_MODEL") else "неизвестно"
+            )
         except Exception:
             model_name = "неизвестно"
 
         # Получаем интервал
         try:
-            interval = config.CHECK_INTERVAL_SECONDS if hasattr(config, 'CHECK_INTERVAL_SECONDS') else 60
+            interval = (
+                config.CHECK_INTERVAL_SECONDS
+                if hasattr(config, "CHECK_INTERVAL_SECONDS")
+                else 60
+            )
         except Exception:
             interval = 60
 
@@ -699,7 +721,7 @@ async def cmd_stats(message: types.Message):
 
         if not stats or stats.get("total_messages", 0) == 0:
             await message.answer(
-                "� **Пока нет данных для статистики.**\n\n"
+                "🤖 **Пока нет данных для статистики.**\n\n"
                 "Подождите, пока система обработает первые новости из отслеживаемых каналов.",
                 parse_mode=ParseMode.MARKDOWN,
             )
@@ -717,7 +739,7 @@ async def cmd_chat(message: types.Message, command: CommandObject):
     """Чат с ИИ."""
     if not command.args:
         await message.answer(
-            "� **Чат с ИИ-ассистентом**\n\n"
+            "🤖 **Чат с ИИ-ассистентом**\n\n"
             "Использование: `/chat <ваш вопрос>`\n\n"
             "Пример: `/chat Расскажи о погоде`",
             parse_mode=ParseMode.MARKDOWN,
@@ -763,7 +785,7 @@ async def cmd_analyze(message: types.Message, command: CommandObject):
         }.get(analysis.sentiment, "🤔")
 
         response = (
-            f"� **Результаты анализа:**\n\n"
+            f"🤖 **Результаты анализа:**\n\n"
             f"📝 **Содержание:**\n{analysis.summary}\n\n"
             f"🎭 **Тональность:** {sentiment_emoji} {analysis.sentiment}\n\n"
             f"🏷️ **Теги:**\n{hashtags_str}"
@@ -851,7 +873,7 @@ async def cmd_trends(message: types.Message):
         await message.answer(
             "🏷️ **Кликабельные хештеги:**",
             reply_markup=hashtag_keyboard.as_markup(),
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.MARKDOWN,
         )
 
     except Exception as e:
@@ -879,10 +901,14 @@ async def cmd_digest(message: types.Message):
 
         # Формируем компактный дайджест
         digest_text = f"📰 **Дайджест новостей на {digest.get('date', 'сегодня')}**\n\n"
-        
+
         # Статистика
-        positive_count = sum(1 for news in digest["news"] if news.get("sentiment") == "Позитивная")
-        negative_count = sum(1 for news in digest["news"] if news.get("sentiment") == "Негативная")
+        positive_count = sum(
+            1 for news in digest["news"] if news.get("sentiment") == "Позитивная"
+        )
+        negative_count = sum(
+            1 for news in digest["news"] if news.get("sentiment") == "Негативная"
+        )
         neutral_count = len(digest["news"]) - positive_count - negative_count
 
         digest_text += f"📊 **Всего новостей:** {len(digest['news'])}\n"
@@ -890,16 +916,16 @@ async def cmd_digest(message: types.Message):
 
         # Топ новости (краткий список)
         digest_text += "🔥 **Главные новости:**\n\n"
-        
+
         for i, news in enumerate(digest["news"][:8], 1):  # Показываем топ-8
             emoji = {"Позитивная": "😊", "Негативная": "😔", "Нейтральная": "😐"}.get(
                 news.get("sentiment", ""), "📰"
             )
-            
+
             # Краткое описание (первые 80 символов)
-            summary = news.get('summary', 'Нет описания')
+            summary = news.get("summary", "Нет описания")
             short_summary = summary[:80] + "..." if len(summary) > 80 else summary
-            
+
             digest_text += f"{i}. {emoji} {short_summary}\n"
             digest_text += f"   📺 {news.get('channel', 'Неизвестно')[:25]}\n\n"
 
@@ -907,17 +933,21 @@ async def cmd_digest(message: types.Message):
         all_hashtags = []
         for news in digest["news"]:
             if news.get("hashtags"):
-                hashtags = news["hashtags"] if isinstance(news["hashtags"], list) else []
+                hashtags = (
+                    news["hashtags"] if isinstance(news["hashtags"], list) else []
+                )
                 all_hashtags.extend(hashtags)
-        
+
         if all_hashtags:
             # Подсчитываем популярность хештегов
             hashtag_counts = {}
             for tag in all_hashtags:
                 hashtag_counts[tag] = hashtag_counts.get(tag, 0) + 1
-            
+
             # Топ-5 хештегов
-            top_hashtags = sorted(hashtag_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+            top_hashtags = sorted(
+                hashtag_counts.items(), key=lambda x: x[1], reverse=True
+            )[:5]
             if top_hashtags:
                 digest_text += "🏷️ **Популярные темы:** "
                 digest_text += " ".join([f"#{tag}" for tag, _ in top_hashtags])
@@ -927,11 +957,11 @@ async def cmd_digest(message: types.Message):
 
         # Создаем клавиатуру с новостями
         keyboard = get_digest_keyboard(digest["news"][:8])
-        
+
         await progress.edit_text(
-            digest_text, 
+            digest_text,
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=keyboard.as_markup()
+            reply_markup=keyboard.as_markup(),
         )
 
     except Exception as e:
@@ -1021,10 +1051,7 @@ def get_hashtag_keyboard(hashtags: List[str]) -> InlineKeyboardBuilder:
     """Создает клавиатуру с кликабельными хештегами."""
     builder = InlineKeyboardBuilder()
     for hashtag in hashtags[:6]:  # Максимум 6 хештегов
-        builder.button(
-            text=f"#{hashtag}",
-            callback_data=f"hashtag_{hashtag}"
-        )
+        builder.button(text=f"#{hashtag}", callback_data=f"hashtag_{hashtag}")
     builder.adjust(2)  # По 2 кнопки в ряд
     return builder
 
@@ -1032,20 +1059,19 @@ def get_hashtag_keyboard(hashtags: List[str]) -> InlineKeyboardBuilder:
 def get_digest_keyboard(news_list: List[Dict[str, Any]]) -> InlineKeyboardBuilder:
     """Создает клавиатуру для дайджеста новостей."""
     builder = InlineKeyboardBuilder()
-    
+
     for i, news in enumerate(news_list, 1):
         emoji = {"Позитивная": "😊", "Негативная": "😔", "Нейтральная": "😐"}.get(
             news.get("sentiment", ""), "📰"
         )
-        
+
         # Создаем короткий текст для кнопки
         button_text = f"{emoji} {i}"
-        
+
         builder.button(
-            text=button_text,
-            callback_data=f"news_{i-1}"  # Индекс новости (0-based)
+            text=button_text, callback_data=f"news_{i-1}"  # Индекс новости (0-based)
         )
-    
+
     builder.adjust(4)  # По 4 кнопки в ряд
     return builder
 
