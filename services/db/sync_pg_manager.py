@@ -65,7 +65,11 @@ class SyncPostgresManager:
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute(query, params)
-                return cursor.fetchall()
+                # Если запрос возвращает результат
+                if cursor.description is not None:
+                    return cursor.fetchall()  # type: ignore[call-arg]
+                # Для операций INSERT/UPDATE/DELETE ничего не возвращаем
+                return []
         except Exception as e:
             logger.error(f"Ошибка выполнения запроса: {e}")
             # Переподключаемся при ошибке
@@ -73,7 +77,7 @@ class SyncPostgresManager:
                 self._connect()
                 with self.connection.cursor() as cursor:
                     cursor.execute(query, params)
-                    return cursor.fetchall()
+                    return cursor.fetchall()  # type: ignore[call-arg]
             except Exception as e2:
                 logger.error(f"Ошибка повторного выполнения запроса: {e2}")
                 raise
@@ -83,7 +87,9 @@ class SyncPostgresManager:
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute(query, params)
-                return cursor.fetchone()
+                if cursor.description is not None:
+                    return cursor.fetchone()  # type: ignore[call-arg]
+                return None
         except Exception as e:
             logger.error(f"Ошибка выполнения запроса: {e}")
             # Переподключаемся при ошибке
@@ -91,7 +97,7 @@ class SyncPostgresManager:
                 self._connect()
                 with self.connection.cursor() as cursor:
                     cursor.execute(query, params)
-                    return cursor.fetchone()
+                    return cursor.fetchone()  # type: ignore[call-arg]
             except Exception as e2:
                 logger.error(f"Ошибка повторного выполнения запроса: {e2}")
                 raise

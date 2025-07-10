@@ -79,7 +79,7 @@ class PerformanceMonitor:
                 for name, stats in self.operation_stats.items()
             },
             "system_memory": psutil.virtual_memory()._asdict(),
-            "system_cpu": psutil.cpu_percent(interval=1),
+            "system_cpu": psutil.cpu_percent(interval=0.1),
         }
 
     def get_slow_operations(self, threshold_seconds: float = 1.0) -> List[str]:

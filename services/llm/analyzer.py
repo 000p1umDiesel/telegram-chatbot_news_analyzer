@@ -4,10 +4,9 @@
 
 # llm_analyzer.py
 import json
-import re
 import hashlib
 import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, AsyncGenerator
 from langchain_community.llms import Ollama
 from pydantic import BaseModel, Field
 from logger import get_logger
@@ -95,10 +94,21 @@ class OllamaAnalyzer:
         self.cache_size = cache_size
 
         try:
-            self.llm = Ollama(
+            # LLM instance для JSON-ответов (анализ новостей)
+            self.llm_json = Ollama(
                 model=model,
                 base_url=base_url,
                 temperature=0.1,
+                top_p=0.9,
+                repeat_penalty=1.1,
+                format="json",  # гарантирует корректный JSON
+            )
+
+            # Отдельный экземпляр LLM **без** JSON-format для обычного чата
+            self.llm_chat = Ollama(
+                model=model,
+                base_url=base_url,
+                temperature=0.2,
                 top_p=0.9,
                 repeat_penalty=1.1,
             )
@@ -119,7 +129,7 @@ class OllamaAnalyzer:
             await asyncio.get_event_loop().run_in_executor(None, _ollama.pull, model)
 
             # Тестовый запрос для проверки работоспособности
-            test_response = await self.llm.ainvoke("Test", temperature=0.0)
+            test_response = await self.llm_json.ainvoke("Test", temperature=0.0)
             self.logger.info("Модель %s успешно загружена и протестирована", model)
         except Exception as e:
             self.logger.warning("Не удалось проверить модель %s: %s", model, e)
@@ -162,37 +172,24 @@ JSON:
             text=safe_text,
         )
 
-    def _parse_json_response(self, response: str) -> Optional[Dict[str, Any]]:
-        """Улучшенный парсинг JSON из ответа LLM."""
-        try:
-            # Ищем JSON блок в ответе
-            json_patterns = [
-                r'\{[^{}]*"summary"[^{}]*"sentiment"[^{}]*"hashtags"[^{}]*\}',
-                r'\{[^{}]*"hashtags"[^{}]*"sentiment"[^{}]*"summary"[^{}]*\}',
-                r'\{.*?"summary".*?"sentiment".*?"hashtags".*?\}',
-                r"\{.*?\}",
-            ]
+    # ------------------------------------------------------------------
+    # Streaming helper (используется в чате)
+    # ------------------------------------------------------------------
 
-            for pattern in json_patterns:
-                match = re.search(pattern, response, re.DOTALL)
-                if match:
-                    try:
-                        data = json.loads(match.group(0))
-                        # Проверяем, что есть все необходимые поля
-                        if all(
-                            key in data for key in ["summary", "sentiment", "hashtags"]
-                        ):
-                            return data
-                    except json.JSONDecodeError:
-                        continue
+    async def _stream_llm(self, prompt: str) -> str:
+        """Возвращает полный ответ, собирая чанки из astream для демонстрации streaming-mode."""
+        chunks: List[str] = []
+        # Используется JSON-модель для анализа. Для чата см. _stream_chat_llm.
+        async for chunk in self.llm_json.astream(prompt):  # type: ignore[attr-defined]
+            chunks.append(str(chunk))
+        return "".join(chunks)
 
-            # Если не нашли валидный JSON, логируем ошибку
-            self.logger.warning("Не найден валидный JSON в ответе: %s", response[:200])
-            return None
-
-        except Exception as e:
-            self.logger.error("Ошибка парсинга JSON: %s", e)
-            return None
+    async def _stream_chat_llm(self, prompt: str) -> str:
+        """Streaming helper для обычного чата (без JSON-format)."""
+        chunks: List[str] = []
+        async for chunk in self.llm_chat.astream(prompt):  # type: ignore[attr-defined]
+            chunks.append(str(chunk))
+        return "".join(chunks)
 
     # ----------------------------------------- public API ---------------
     @retry_with_backoff(
@@ -217,37 +214,74 @@ JSON:
                 prompt = self._get_optimized_prompt(message_text)
                 start = time.perf_counter()
                 try:
-                    response = await self.llm.ainvoke(prompt)
-                    latency_ms = int((time.perf_counter() - start) * 1000)
-
-                    # Парсим JSON из ответа
-                    data = self._parse_json_response(response)
-                    if not data:
-                        return None
+                    response_start = time.perf_counter()
+                    response_raw = await self.llm_json.ainvoke(prompt)
+                    latency_ms = int((time.perf_counter() - response_start) * 1000)
+                    # Ollama в JSON-mode уже вернёт строку-JSON либо dict
+                    if isinstance(response_raw, dict):
+                        response_json: Dict[str, Any] = response_raw
+                        response_str = json.dumps(response_raw, ensure_ascii=False)
+                    elif isinstance(response_raw, list):
+                        # В редком случае модель может вернуть список, оборачиваем
+                        response_json = {
+                            "summary": " ",
+                            "sentiment": "Нейтральная",
+                            "hashtags": response_raw,
+                        }
+                        response_str = json.dumps(response_json, ensure_ascii=False)
+                    else:
+                        response_str = str(response_raw)
+                        try:
+                            response_json = json.loads(response_str)
+                        except json.JSONDecodeError:
+                            self.logger.warning(
+                                "Некорректный JSON от модели: %s", response_str[:200]
+                            )
+                            return None
 
                     # Очищаем и валидируем хештеги
-                    data["hashtags"] = clean_and_validate_hashtags(
-                        data.get("hashtags", [])
-                    )
+                    data: Dict[str, Any] = response_json  # уже гарантирован JSON-mode
+                    # Чистим хештеги
+                    if isinstance(data.get("hashtags"), list):
+                        data["hashtags"] = clean_and_validate_hashtags(
+                            data.get("hashtags", [])
+                        )
 
-                    analysis = NewsAnalysis(**data)
+                    analysis = NewsAnalysis(**data)  # type: ignore[arg-type]
                     self.analysis_cache.put(cache_key, analysis)
 
-                    # логируем вызов LLM в БД (fire-and-forget)
+                    # Логируем вызов LLM в БД (fire-and-forget).
+                    # Ожидаемая сигнатура: log_llm_call(prompt: str, completion: str, latency_ms: int)
                     if services.data_manager and hasattr(
                         services.data_manager, "log_llm_call"
                     ):
                         try:
-                            services.data_manager.log_llm_call(
-                                prompt_tokens=len(prompt.split()),
-                                completion_tokens=len(response.split()),
-                                latency_ms=latency_ms,
-                                model=config.OLLAMA_MODEL,
+                            # Запускаем без ожидания внутри фоновой задачи,
+                            # чтобы не блокировать основной анализ.
+                            import asyncio as _asyncio
+
+                            _asyncio.create_task(
+                                services.data_manager.log_llm_call(
+                                    prompt,
+                                    response_str,
+                                    latency_ms,
+                                )
                             )
                         except Exception as log_err:
                             self.logger.debug(
                                 "Не удалось записать лог LLM: %s", log_err
                             )
+
+                    # Токены (грубая оценка) — логируем для мониторинга
+                    prompt_tokens = len(prompt.split())
+                    completion_tokens = len(response_str.split())
+                    total_tokens = prompt_tokens + completion_tokens
+                    self.logger.info(
+                        "LLM tokens: prompt=%d, completion=%d, total=%d",
+                        prompt_tokens,
+                        completion_tokens,
+                        total_tokens,
+                    )
 
                     return analysis
 
@@ -283,8 +317,8 @@ JSON:
 Ассистент:"""
 
             async with self.semaphore:
-                response = await self.llm.ainvoke(chat_prompt)
-                return str(response).strip()
+                response = await self._stream_chat_llm(chat_prompt)
+                return response.strip()
 
         except Exception as e:
             self.logger.error(f"Ошибка получения ответа чата: {e}")

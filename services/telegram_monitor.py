@@ -3,11 +3,9 @@
 import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
-import os
-import json
 
 from telethon import TelegramClient, events
-from telethon.errors import SessionPasswordNeededError, FloodWaitError
+from telethon.errors import FloodWaitError
 from telethon.tl.types import Channel, Chat
 from telethon.sessions import StringSession
 
