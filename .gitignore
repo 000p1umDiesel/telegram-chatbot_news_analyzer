@@ -71,6 +71,25 @@ logs/
 *.pid
 
 # =====================================
+# Database & Security Configuration
+# =====================================
+# Database configuration files
+db_config.json
+database.json
+postgres_config.json
+mysql_config.json
+
+# Security and credentials
+secrets.json
+credentials.json
+api_keys.json
+.secrets/
+*.key
+*.pem
+*.crt
+*.p12
+
+# =====================================
 # Testing & Evaluation Results
 # =====================================
 # Test result files

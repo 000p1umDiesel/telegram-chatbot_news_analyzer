@@ -7,4 +7,41 @@ logs/
 .sessions/
 .git/
 .env
-.DS_Store 
+.DS_Store
+
+# Database & Security Configuration
+db_config.json
+database.json
+postgres_config.json
+mysql_config.json
+secrets.json
+credentials.json
+api_keys.json
+.secrets/
+*.key
+*.pem
+*.crt
+*.p12
+
+# Test results and temporary files
+evaluation/*_results.json
+evaluation/test_report.json
+evaluation/test_report.txt
+evaluation/test_suite_report.json
+evaluation/demo_results.json
+
+# Development files
+.pytest_cache/
+.coverage*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Editor files
+.idea/
+.vscode/
+*.sublime*
+
+# Backups
+*~
+*.bak 
