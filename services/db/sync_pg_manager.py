@@ -293,7 +293,7 @@ class SyncPostgresManager:
     def get_trends_statistics(self) -> Dict[str, Any]:
         """Возвращает статистику трендов за последние дни."""
         try:
-            # Популярные хештеги за последние 7 дней
+            # Популярные хештеги за последние 7 дня
             hashtags_query = """
                 SELECT jsonb_array_elements_text(a.hashtags) as hashtag, COUNT(*) as count
                 FROM analyses a
@@ -307,7 +307,7 @@ class SyncPostgresManager:
             hashtag_rows = self._execute(hashtags_query)
             popular_hashtags = [row["hashtag"] for row in hashtag_rows]
 
-            # Самые активные каналы за последние 7 дней
+            # Самые активные каналы за последние 7 дня
             channels_query = """
                 SELECT 
                     m.channel_title as title,

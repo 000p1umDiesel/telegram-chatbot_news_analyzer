@@ -467,7 +467,7 @@ async def process_hashtag_click(callback_query: types.CallbackQuery):
         # Ищем новости с данным хештегом (исправленный запрос для JSONB)
         news_with_hashtag = data_manager._execute(
             """
-            SELECT a.summary, a.sentiment, m.channel_title, m.channel_username, m.message_id
+            SELECT a.summary, a.sentiment, m.channel_title, m.channel_username, m.message_id, m.channel_id
             FROM analyses a
             JOIN messages m ON a.message_id = m.message_id
             WHERE a.hashtags::jsonb ? %s
@@ -497,11 +497,98 @@ async def process_hashtag_click(callback_query: types.CallbackQuery):
                 f"   📺 {news.get('channel_title', 'Неизвестный канал')}\n\n"
             )
 
-        await callback_query.message.answer(response_text)
+        response_text += "👇 **Выберите новость для перехода:**"
+
+        # Создаем клавиатуру с кнопками для каждой новости
+        keyboard = get_hashtag_news_keyboard(news_with_hashtag, hashtag)
+
+        await callback_query.message.answer(
+            response_text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=keyboard.as_markup(),
+        )
 
     except Exception as e:
         logger.error(f"Ошибка поиска по хештегу {hashtag}: {e}")
         await callback_query.message.answer(f"❌ Ошибка поиска по хештегу #{hashtag}.")
+
+
+@dp.callback_query(F.data.startswith("hashtag_news_"))
+async def process_hashtag_news_click(callback_query: types.CallbackQuery):
+    """Обрабатывает клик по новости из списка трендов."""
+    await callback_query.answer()
+
+    if not callback_query.message:
+        return
+
+    try:
+        # Извлекаем hashtag и news_index из callback_data
+        callback_data = callback_query.data.replace("hashtag_news_", "")
+        parts = callback_data.rsplit("_", 1)  # Разделяем по последнему _
+        if len(parts) != 2:
+            await callback_query.message.answer("❌ Неверный формат данных.")
+            return
+
+        hashtag = parts[0]
+        news_index = int(parts[1])
+
+        data_manager = get_simple_data_manager()
+        if not data_manager:
+            await callback_query.message.answer("❌ Сервис временно недоступен.")
+            return
+
+        # Получаем новости с данным хештегом заново
+        news_with_hashtag = data_manager._execute(
+            """
+            SELECT a.summary, a.sentiment, m.channel_title, m.channel_username, m.message_id, m.channel_id
+            FROM analyses a
+            JOIN messages m ON a.message_id = m.message_id
+            WHERE a.hashtags::jsonb ? %s
+            ORDER BY m.date DESC
+            LIMIT 5
+            """,
+            (hashtag,),
+        )
+
+        if not news_with_hashtag or news_index >= len(news_with_hashtag):
+            await callback_query.message.answer("❌ Новость не найдена.")
+            return
+
+        news = news_with_hashtag[news_index]
+        emoji = {"Позитивная": "😊", "Негативная": "😔", "Нейтральная": "😐"}.get(
+            news.get("sentiment", ""), "📰"
+        )
+
+        # Формируем подробное сообщение
+        news_text = f"{emoji} Новость из трендов #{hashtag}\n\n"
+        news_text += f"📝 Содержание:\n{news.get('summary', 'Нет описания')}\n\n"
+        news_text += f"🎭 Тональность: {news.get('sentiment', 'Неизвестно')}\n"
+        news_text += f"📺 Канал: {news.get('channel_title', 'Неизвестно')}\n"
+
+        # Создаем ссылку на оригинальное сообщение
+        message_link = None
+        if news.get("channel_username") and news.get("message_id"):
+            username = news["channel_username"].lstrip("@")
+            message_link = f"https://t.me/{username}/{news['message_id']}"
+        elif news.get("channel_id") and news.get("message_id"):
+            channel_id_str = str(news["channel_id"]).lstrip("-100")
+            message_link = f"https://t.me/c/{channel_id_str}/{news['message_id']}"
+
+        # Создаем клавиатуру с кнопкой для перехода к оригиналу
+        keyboard = InlineKeyboardBuilder()
+        if message_link:
+            keyboard.button(text="🔗 Читать оригинал", url=message_link)
+        keyboard.adjust(1)
+
+        await callback_query.message.answer(
+            news_text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=keyboard.as_markup(),
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка при получении новости из трендов: {e}")
+        await callback_query.message.answer("❌ Ошибка при получении новости.")
 
 
 @dp.callback_query(F.data.startswith("news_"))
@@ -1053,6 +1140,28 @@ def get_hashtag_keyboard(hashtags: List[str]) -> InlineKeyboardBuilder:
     for hashtag in hashtags[:6]:  # Максимум 6 хештегов
         builder.button(text=f"#{hashtag}", callback_data=f"hashtag_{hashtag}")
     builder.adjust(2)  # По 2 кнопки в ряд
+    return builder
+
+
+def get_hashtag_news_keyboard(
+    news_list: List[Dict[str, Any]], hashtag: str
+) -> InlineKeyboardBuilder:
+    """Создает клавиатуру для новостей по хештегу."""
+    builder = InlineKeyboardBuilder()
+
+    for i, news in enumerate(news_list, 1):
+        emoji = {"Позитивная": "😊", "Негативная": "😔", "Нейтральная": "😐"}.get(
+            news.get("sentiment", ""), "📰"
+        )
+
+        # Создаем кнопку для перехода к новости
+        button_text = f"{emoji} {i}. Читать"
+        builder.button(
+            text=button_text,
+            callback_data=f"hashtag_news_{hashtag}_{i-1}",  # Индекс новости (0-based)
+        )
+
+    builder.adjust(1)  # По 1 кнопке в ряд
     return builder
 
 
